@@ -6,9 +6,7 @@ import ReactFlow, {
   useNodesState,
   useEdgesState,
   Controls,
-  Background,
-  Handle,
-  Position
+  Background
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { 
@@ -16,39 +14,88 @@ import {
   createTheme,
   CssBaseline,
   Box,
-  Typography,
-  Paper,
   GlobalStyles,
   TextField,
-  IconButton,
   InputAdornment,
-  Menu,
-  MenuItem,
   Snackbar,
   Alert
 } from '@mui/material';
 import { 
   Info as InfoIcon, 
   KeyboardReturn as EnterIcon,
-  Psychology as PsychologyIcon,
-  Close as CloseIcon
+  Psychology as PsychologyIcon
 } from '@mui/icons-material';
 
-// 创建MUI主题
+// 导入主题和组件
+import { colors, shadows, canvasColors } from './theme/colors';
+import { fonts } from './theme/fonts';
+import { RoundIconButton } from './assets/components/Button';
+import { InfoPanel, StatusPanel, FloatingPanel } from './assets/components/Panel';
+import { 
+  nodeTypes, 
+  initialNodes, 
+  initialEdges, 
+  NodeGlobalStyles 
+} from './assets/components/CustomNode';
+import Menu from './assets/components/Menu';
+import { traceNodeChain, applyChainHighlight, clearChainHighlight } from './utils/nodeUtils';
+
+// http://localhost:8000/chat
+// https://cognitivediarybackend.fly.dev
+// 全局配置 - 后端API基础URL
+const API_BASE_URL = 'http://localhost:8000';
+
+// 创建MUI主题 - 使用颜色主题
 const theme = createTheme({
   palette: {
     primary: {
-      main: '#1976d2',
+      main: colors.primary.main,
+      light: colors.primary.light,
+      dark: colors.primary.dark,
+      contrastText: colors.primary.contrastText,
     },
     secondary: {
-      main: '#dc004e',
+      main: colors.secondary.main,
+      light: colors.secondary.light,
+      dark: colors.secondary.dark,
+      contrastText: colors.secondary.contrastText,
+    },
+    success: {
+      main: colors.success.main,
+      light: colors.success.light,
+      dark: colors.success.dark,
+      contrastText: colors.success.contrastText,
+    },
+    warning: {
+      main: colors.warning.main,
+      light: colors.warning.light,
+      dark: colors.warning.dark,
+      contrastText: colors.warning.contrastText,
+    },
+    error: {
+      main: colors.error.main,
+      light: colors.error.light,
+      dark: colors.error.dark,
+      contrastText: colors.error.contrastText,
+    },
+    info: {
+      main: colors.info.main,
+      light: colors.info.light,
+      dark: colors.info.dark,
+      contrastText: colors.info.contrastText,
     },
     background: {
-      default: '#f5f5f5',
+      default: colors.background.default,
+      paper: colors.background.paper,
+    },
+    text: {
+      primary: colors.text.primary,
+      secondary: colors.text.secondary,
+      disabled: colors.text.disabled,
     },
   },
   typography: {
-    fontFamily: '"Roboto", "Helvetica", "Arial", sans-serif',
+    fontFamily: fonts.families.sans,
   },
 });
 
@@ -81,216 +128,23 @@ const globalStyles = (
   />
 );
 
-// 自定义节点组件 - 使用MUI样式
-const CustomNode = ({ data, selected, id }) => {
-  const [anchorEl, setAnchorEl] = useState(null);
-  const open = Boolean(anchorEl);
-  
-  // 检查节点是否被锁定
-  const isLocked = data.isLocked || false;
-  const isThinking = data.label === "🤔 Thinking...";
-
-  const handleContextMenu = (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    setAnchorEl(event.currentTarget);
-  };
-
-  const handleClose = () => {
-    setAnchorEl(null);
-  };
-
-  const handleAskLLM = () => {
-    // 触发询问LLM的事件
-    console.log('CustomNode - 准备调用LLM, 节点ID:', id, '节点内容:', data.label);
-    console.log('CustomNode - 回调函数存在:', !!data.onAskLLM);
-    if (data.onAskLLM) {
-      data.onAskLLM(id, data.label);
-    } else {
-      console.error('CustomNode - 回调函数不存在!');
-    }
-    handleClose();
-  };
-
-  return (
-    <>
-      <Paper
-        elevation={selected ? 8 : 3}
-        onContextMenu={handleContextMenu}
-        sx={{
-          padding: '14px 18px',
-          minWidth: '120px',
-          maxWidth: '300px', // 设置最大宽度
-          textAlign: 'center',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          position: 'relative',
-          borderRadius: '12px',
-          border: selected ? '2px solid #1976d2' : 
-                 isLocked ? '2px solid #ff9800' : 
-                 '2px solid transparent',
-          backgroundColor: isLocked ? '#fff3e0' : 'white', // 锁定时淡橙色背景
-          opacity: isThinking ? 0.8 : 1, // thinking状态半透明
-          transition: 'all 0.2s ease-in-out',
-          cursor: 'pointer !important',
-          '&:hover': {
-            elevation: 6,
-            transform: isLocked ? 'none' : 'scale(1.02)', // 锁定时不缩放
-          }
-        }}
-      >
-        <Handle
-          type="target"
-          position={Position.Left}
-          style={{
-            background: '#1976d2',
-            border: '3px solid #ffffff',
-            width: '14px',
-            height: '14px',
-            boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
-            cursor: 'crosshair'
-          }}
-        />
-        <Typography 
-          variant="body2" 
-          sx={{ 
-            fontWeight: 500,
-            color: '#333',
-            fontSize: '14px',
-            lineHeight: 1.4, // 增加行高
-            cursor: 'pointer',
-            wordBreak: 'break-word', // 允许单词内断行
-            whiteSpace: 'pre-wrap', // 保留换行符和空格
-            overflow: 'hidden', // 隐藏溢出
-            display: '-webkit-box',
-            WebkitLineClamp: 8, // 最多显示8行
-            WebkitBoxOrient: 'vertical',
-            minHeight: '1.4em', // 最小高度为一行
-            textAlign: 'center', // 居中对齐
-            margin: 0,
-            padding: 0
-          }}
-        >
-          {data.label}
-        </Typography>
-        <Handle
-          type="source"
-          position={Position.Right}
-          style={{
-            background: '#1976d2',
-            border: '3px solid #ffffff',
-            width: '14px',
-            height: '14px',
-            boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
-            cursor: 'crosshair'
-          }}
-        />
-      </Paper>
-      
-      {/* 右键菜单 */}
-      {!isThinking && (
-        <Menu
-          anchorEl={anchorEl}
-          open={open}
-          onClose={handleClose}
-          sx={{
-            '& .MuiPaper-root': {
-              borderRadius: '8px',
-              boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
-              border: '1px solid #e0e0e0'
-            }
-          }}
-        >
-          <MenuItem 
-            onClick={handleAskLLM} 
-            disabled={isLocked}
-            sx={{ 
-              minWidth: '150px',
-              '&:hover': {
-                backgroundColor: isLocked ? 'transparent' : '#f5f5f5'
-              },
-              opacity: isLocked ? 0.5 : 1
-            }}
-          >
-            <PsychologyIcon sx={{ mr: 1, color: isLocked ? '#ccc' : '#1976d2' }} />
-            Ask LLM
-          </MenuItem>
-        </Menu>
-      )}
-    </>
-  );
-};
-
-// 节点类型定义 - 移到组件外部
-const nodeTypes = {
-  custom: CustomNode,
-};
-
-const initialNodes = [
-  { 
-    id: '1', 
-    type: 'custom',
-    position: { x: 100, y: 100 }, 
-    data: { label: '开始节点' } 
-  },
-  { 
-    id: '2', 
-    type: 'custom',
-    position: { x: 350, y: 100 }, 
-    data: { label: '中间节点' } 
-  },
-  { 
-    id: '3', 
-    type: 'custom',
-    position: { x: 600, y: 100 }, 
-    data: { label: '结束节点' } 
-  }
-];
-
-const initialEdges = [
-  { 
-    id: 'e1-2', 
-    source: '1', 
-    target: '2',
-    type: 'smoothstep',
-    markerEnd: {
-      type: 'arrowclosed',
-      color: '#1976d2'
-    },
-    style: {
-      stroke: '#1976d2',
-      strokeWidth: 2
-    }
-  },
-  { 
-    id: 'e2-3', 
-    source: '2', 
-    target: '3',
-    type: 'smoothstep',
-    markerEnd: {
-      type: 'arrowclosed',
-      color: '#1976d2'
-    },
-    style: {
-      stroke: '#1976d2',
-      strokeWidth: 2
-    }
-  }
-];
-
 function Flow() {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
-  const [nodeId, setNodeId] = useState(4);
+  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [isInputVisible, setIsInputVisible] = useState(false);
   const [inputPosition, setInputPosition] = useState({ x: 0, y: 0 });
   const [inputValue, setInputValue] = useState('');
   const [selectedNodes, setSelectedNodes] = useState([]);
+  const [selectedEdges, setSelectedEdges] = useState([]);
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
   const [snackbarSeverity, setSnackbarSeverity] = useState('success');
+  
+  // 菜单相关状态
+  const [isMenuVisible, setIsMenuVisible] = useState(false);
+  const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
+  const [isThinkingMode, setIsThinkingMode] = useState(false); // 标记是否为思考模式
+  const [isAnnotationMode, setIsAnnotationMode] = useState(false); // 标记是否为标注模式
   const { screenToFlowPosition } = useReactFlow();
   const inputRef = useRef(null);
   
@@ -299,10 +153,22 @@ function Flow() {
   const [lastSaved, setLastSaved] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [dataLoaded, setDataLoaded] = useState(false); // 添加数据加载状态标记
+  const [hasLoadedUserData, setHasLoadedUserData] = useState(false); // 标记是否已加载用户数据
   const hasInitializedRef = useRef(false);
+
+  // 使用useRef来持有最新的节点和边状态，避免在回调中出现闭包问题
+  const nodesRef = useRef(nodes);
+  nodesRef.current = nodes;
+  const edgesRef = useRef(edges);
+  edgesRef.current = edges;
   
   // 节点锁定状态管理
   const [lockedNodes, setLockedNodes] = useState(new Set());
+  
+  // 链式查询状态管理
+  const [isChainHighlighted, setIsChainHighlighted] = useState(false);
+  const [currentChainData, setCurrentChainData] = useState(null);
   
   // 自定义双击检测
   const clickTimeoutRef = useRef(null);
@@ -312,13 +178,30 @@ function Flow() {
   // handleAskLLM函数引用，避免循环依赖
   const handleAskLLMRef = useRef(null);
   
-  // nodeId的引用，避免闭包问题
-  const nodeIdRef = useRef(nodeId);
+  // handleChainedQuery函数引用，避免循环依赖
+  const handleChainedQueryRef = useRef(null);
   
-  // 同步nodeId和nodeIdRef
-  useEffect(() => {
-    nodeIdRef.current = nodeId;
-  }, [nodeId]);
+  // 生成唯一节点ID的函数
+  const generateUniqueNodeId = useCallback((currentNodes = []) => {
+    // 获取当前所有节点的数字ID
+    const existingIds = currentNodes
+      .map(node => parseInt(node.id))
+      .filter(id => !isNaN(id));
+    
+    // 如果没有现有ID，从1开始
+    if (existingIds.length === 0) {
+      return '1';
+    }
+    
+    // 找到最大ID并加1
+    const maxId = Math.max(...existingIds);
+    return (maxId + 1).toString();
+  }, []);
+  
+  // 当前最大节点ID的引用，避免闭包问题
+  const getNextNodeId = useCallback(() => {
+    return generateUniqueNodeId(nodes);
+  }, [nodes, generateUniqueNodeId]);
   
 
 
@@ -332,7 +215,8 @@ function Flow() {
       const timeoutId = setTimeout(() => controller.abort(), 30000);
       
       console.log('📡 发送请求到后端...');
-      const response = await fetch('http://localhost:8000/chat', {
+      // 使用正确的chat端点
+      const response = await fetch(`${API_BASE_URL}/chat`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -366,56 +250,96 @@ function Flow() {
   }, []); // 无依赖项
 
   // 数据保存函数
-  const saveData = useCallback(async (showNotification = true) => {
-    // 使用函数式更新来避免闭包问题
-    setIsSaving(prev => {
-      if (prev) return prev; // 如果已经在保存中，则不执行
-      
-      // 异步执行保存逻辑
-      (async () => {
-        try {
-          const response = await fetch('http://localhost:8000/save-data', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              username: username,
-              nodes: nodes,
-              edges: edges
-            })
-          });
+  const saveData = useCallback(async (options = {}) => {
+    // 防止重复保存
+    if (isSaving) {
+      console.log('⏳ 正在保存中，跳过重复保存');
+      return;
+    }
+    
+    // 额外的防重复机制 - 如果上次保存距离现在不到1秒，则跳过
+    const now = Date.now();
+    const lastSaveTime = saveData.lastSaveTime || 0;
+    if (now - lastSaveTime < 50) {
+      console.log('⏭️ 距离上次保存不到1秒，跳过重复保存');
+      return;
+    }
+    saveData.lastSaveTime = now;
+    
+    setIsSaving(true);
 
-          if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-          }
+    const { 
+      nodes: nodesToSaveParam, 
+      edges: edgesToSaveParam, 
+      showNotification = true 
+    } = options;
+    
+    const nodesToSave = nodesToSaveParam || nodesRef.current;
+    const edgesToSave = edgesToSaveParam || edgesRef.current;
 
-          const data = await response.json();
-          setLastSaved(new Date());
-          
-          if (showNotification) {
-            setSnackbarMessage('数据保存成功！');
-            setSnackbarSeverity('success');
-            setSnackbarOpen(true);
-          }
-          
-          console.log('数据保存成功:', data);
-          
-        } catch (error) {
-          console.error('数据保存失败:', error);
-          if (showNotification) {
-            setSnackbarMessage('数据保存失败: ' + error.message);
-            setSnackbarSeverity('error');
-            setSnackbarOpen(true);
-          }
-        } finally {
-          setIsSaving(false);
-        }
-      })();
-      
-      return true; // 设置为保存中状态
+
+    console.log('📤 开始保存数据:', { 
+      username, 
+      nodesCount: nodesToSave.length, 
+      edgesCount: edgesToSave.length,
+      showNotification
     });
-  }, [username, nodes, edges]); // 移除状态更新函数依赖
+    
+    try {
+      const requestData = {
+        username: username,
+        nodes: nodesToSave,
+        edges: edgesToSave
+      };
+      
+      console.log('📡 发送保存请求到后端...', requestData);
+      
+      const response = await fetch(`${API_BASE_URL}/save-data`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestData)
+      });
+
+      console.log('📡 收到后端响应，状态码:', response.status);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+      }
+
+      const data = await response.json();
+      setLastSaved(new Date());
+      
+      if (showNotification) {
+        setSnackbarMessage('数据保存成功！');
+        setSnackbarSeverity('success');
+        setSnackbarOpen(true);
+      }
+      
+      console.log('✅ 数据保存成功:', data);
+      
+    } catch (error) {
+      console.error('❌ 数据保存失败:', error);
+      console.error('❌ 错误详情:', {
+        message: error.message,
+        stack: error.stack,
+        name: error.name
+      });
+      
+      if (showNotification) {
+        setSnackbarMessage('数据保存失败: ' + error.message);
+        setSnackbarSeverity('error');
+        setSnackbarOpen(true);
+      }
+      
+      // 重新抛出错误，让调用者能够捕获
+      throw error;
+    } finally {
+      setIsSaving(false);
+    }
+  }, [username, isSaving]);
 
   // 更新节点内容
   const updateNode = useCallback((nodeId, newData) => {
@@ -433,8 +357,330 @@ function Flow() {
     updateNode(nodeId, { isLocked: locked });
   }, [updateNode]);
 
+  // ==================================================================
+  // LLM 和链式查询相关函数
+  // ==================================================================
+
+  // 处理Ask LLM请求 - 简化版本
+  const handleAskLLM = useCallback(async (sourceNodeId, nodeContent) => {
+    console.log('🚀 开始LLM请求，源节点ID:', sourceNodeId, '内容:', nodeContent);
+    
+    // 1. 立即锁定被提问的节点
+    setNodeLocked(sourceNodeId, true);
+    
+    // 2. 生成thinking节点ID和位置
+    let thinkingNodeId = null;
+    
+    const sourceNode = nodesRef.current.find(node => node.id === sourceNodeId);
+    if (!sourceNode) {
+      console.error('❌ 找不到源节点:', sourceNodeId);
+      setNodeLocked(sourceNodeId, false);
+      return;
+    }
+    
+    thinkingNodeId = generateUniqueNodeId(nodesRef.current);
+    
+    const thinkingPosition = {
+      x: sourceNode.position.x + (sourceNode.width || 300) + 50,
+      y: sourceNode.position.y
+    };
+    
+    const thinkingNode = {
+      id: thinkingNodeId,
+      type: 'custom',
+      position: thinkingPosition,
+      data: { 
+        label: "🤔 Thinking...",
+        isLocked: true,
+        onAskLLM: (...args) => handleAskLLMRef.current?.(...args)
+      }
+    };
+    
+    const newEdge = {
+      id: `llm-${sourceNodeId}-${thinkingNodeId}`,
+      source: sourceNodeId,
+      target: thinkingNodeId,
+      type: 'smoothstep',
+      markerEnd: { 
+        type: 'arrowclosed', 
+        color: colors.edge.default 
+      },
+      style: { 
+        stroke: colors.edge.default, 
+        strokeWidth: 2 
+      }
+    };
+    
+    // 3. 在本地状态中添加 thinking 节点和边（不保存）
+    setNodes(currentNodes => [...currentNodes, thinkingNode]);
+    setEdges(currentEdges => {
+      const edgeExists = currentEdges.some(edge => edge.id === newEdge.id);
+      if (edgeExists) {
+        return currentEdges;
+      }
+      return [...currentEdges, newEdge];
+    });
+    
+    // 4. 开始异步LLM调用
+    try {
+      const llmResponse = await callLLM(nodeContent);
+      
+      // 5. LLM成功，手动计算最终状态
+      const finalNodes = nodesRef.current.map(node => {
+        if (node.id === thinkingNodeId) {
+          return { ...node, data: { ...node.data, label: llmResponse, isLocked: false } };
+        }
+        if (node.id === sourceNodeId) {
+          return { ...node, data: { ...node.data, isLocked: false } };
+        }
+        return node;
+      });
+
+      // 6. 使用最新状态更新UI
+      setNodes(finalNodes);
+
+      setSnackbarMessage('LLM分析完成！');
+      setSnackbarSeverity('success');
+      setSnackbarOpen(true);
+      
+      // 7. 此时执行唯一的一次保存，并传入最新的节点状态
+      try {
+        console.log('📤 LLM成功后，执行最终保存');
+        // 直接传递最新的nodes状态，edges状态没有变化，使用ref里的即可
+        await saveData({ nodes: finalNodes, showNotification: false });
+        console.log('✅ LLM成功后保存成功');
+      } catch (error) {
+        console.error('❌ LLM成功后保存失败:', error);
+        setSnackbarMessage('LLM分析完成但保存失败: ' + error.message);
+        setSnackbarSeverity('error');
+        setSnackbarOpen(true);
+      }
+      
+    } catch (error) {
+      console.error('❌ LLM调用失败:', error);
+
+      // 8. LLM失败，从UI上直接移除临时的thinking节点和边
+      setNodes(nds => nds.filter(n => n.id !== thinkingNodeId));
+      setEdges(eds => eds.filter(e => e.id !== newEdge.id));
+
+      // 解锁源节点
+      setNodeLocked(sourceNodeId, false);
+      
+      setSnackbarMessage('LLM调用失败: ' + error.message);
+      setSnackbarSeverity('error');
+      setSnackbarOpen(true);
+    }
+  }, [setNodeLocked, updateNode, generateUniqueNodeId, callLLM, saveData]);
+  
+  // 处理链式查询请求
+  const handleChainedQuery = useCallback(async (sourceNodeId, nodeContent) => {
+    console.log('🔗 开始链式查询，源节点ID:', sourceNodeId, '内容:', nodeContent);
+    
+    // 清除之前的高亮
+    if (isChainHighlighted) {
+      console.log('🧹 清除之前的链式高亮');
+      const { nodes: clearedNodes, edges: clearedEdges } = clearChainHighlight(nodesRef.current, edgesRef.current, colors);
+      setNodes(clearedNodes);
+      setEdges(clearedEdges);
+      setIsChainHighlighted(false);
+      setCurrentChainData(null);
+    }
+    
+    // 追踪节点链
+    const { chainNodes, chainEdges } = traceNodeChain(sourceNodeId, nodesRef.current, edgesRef.current);
+    
+    if (chainNodes.length === 0) {
+      console.log('⚠️ 没有找到节点链');
+      setSnackbarMessage('没有找到连接到此节点的链路');
+      setSnackbarSeverity('warning');
+      setSnackbarOpen(true);
+      return;
+    }
+    
+    // 应用高亮
+    console.log('🔍 高亮前 - 节点数:', nodesRef.current.length, '边数:', edgesRef.current.length);
+    console.log('🔍 链式追踪结果 - 链节点数:', chainNodes.length, '链边数:', chainEdges.length);
+    const { nodes: highlightedNodes, edges: highlightedEdges } = applyChainHighlight(
+      nodesRef.current, 
+      edgesRef.current, 
+      chainNodes, 
+      chainEdges, 
+      colors
+    );
+    console.log('🔍 高亮后 - 节点数:', highlightedNodes.length, '边数:', highlightedEdges.length);
+    
+    setNodes(highlightedNodes);
+    setEdges(highlightedEdges);
+    setIsChainHighlighted(true);
+    setCurrentChainData({ chainNodes, chainEdges });
+    
+    // 收集链中所有节点的内容
+    const chainContent = chainNodes.reverse().map(node => node.data.label).join(' -> ');
+    console.log('🔗 链式内容:', chainContent);
+    
+    // 构造链式查询的请求数据
+    const chainQueryData = {
+      chain_nodes: chainNodes.map(node => ({
+        id: node.id,
+        label: node.data.label
+      })),
+      target_node_content: nodeContent,
+      temperature: 0.7
+    };
+    
+    // 锁定源节点
+    setNodeLocked(sourceNodeId, true);
+    
+    // 生成thinking节点ID和位置
+    let thinkingNodeId = null;
+    
+    // 先找到源节点并计算thinking节点参数
+    const sourceNode = nodesRef.current.find(node => node.id === sourceNodeId);
+    if (!sourceNode) {
+      console.error('❌ 找不到源节点:', sourceNodeId);
+      return;
+    }
+    
+    thinkingNodeId = generateUniqueNodeId(nodesRef.current);
+    
+    // 计算thinking节点位置
+    const thinkingPosition = {
+      x: sourceNode.position.x + (sourceNode.width || 300) + 50,
+      y: sourceNode.position.y
+    };
+    
+    // 创建thinking节点
+    const thinkingNode = {
+      id: thinkingNodeId,
+      type: 'custom',
+      position: thinkingPosition,
+      data: {
+        label: '🔗 Chained Thinking...',
+        onAskLLM: (...args) => handleAskLLMRef.current?.(...args),
+        onChainedQuery: (...args) => handleChainedQueryRef.current?.(...args),
+        isLocked: true
+      }
+    };
+    
+    // 创建连接边
+    const newEdge = {
+      id: `chain-${sourceNodeId}-${thinkingNodeId}`,
+      source: sourceNodeId,
+      target: thinkingNodeId,
+      type: 'smoothstep',
+      markerEnd: {
+        type: 'arrowclosed',
+        color: colors.edge.default
+      },
+      style: {
+        stroke: colors.edge.default,
+        strokeWidth: 2
+      }
+    };
+    
+    // 分别更新节点和边缘，避免嵌套调用
+    setNodes(currentNodes => [...currentNodes, thinkingNode]);
+    
+    // 更新边列表 - 添加重复检查
+    setEdges(currentEdges => {
+      // 检查边缘是否已经存在
+      const edgeExists = currentEdges.some(edge => edge.id === newEdge.id);
+      if (edgeExists) {
+        console.log('⚠️ 链式查询 - 边缘已存在，跳过添加:', newEdge.id);
+        return currentEdges; // 返回原数组，不添加重复边缘
+      }
+      
+      console.log('✅ 链式查询 - 添加新边缘:', { id: newEdge.id, source: newEdge.source, target: newEdge.target });
+      console.log('🔍 链式查询 - 添加前边数:', currentEdges.length, '添加后边数:', currentEdges.length + 1);
+      return [...currentEdges, newEdge];
+    });
+    
+    // 调用链式查询API
+    try {
+      console.log('📡 发送链式查询请求到后端...');
+      const response = await fetch(`${API_BASE_URL}/chain_chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(chainQueryData)
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      const llmResponse = data.response;
+      
+      // 1. 在内存中创建包含LLM响应的节点列表（此时仍有高亮）
+      const nodesWithLlmResponse = nodesRef.current.map(node => {
+        if (node.id === thinkingNodeId) {
+          return { ...node, data: { ...node.data, label: llmResponse, isLocked: false } };
+        }
+        if (node.id === sourceNodeId) {
+          return { ...node, data: { ...node.data, isLocked: false } };
+        }
+        return node;
+      });
+      
+      // 2. 基于上一步的结果，清除所有高亮，生成最终的干净状态
+      console.log('🧹 清除链式高亮并准备最终状态');
+      const { nodes: finalNodes, edges: finalEdges } = clearChainHighlight(
+        nodesWithLlmResponse,
+        edgesRef.current,
+        colors
+      );
+
+      // 3. 一次性更新UI状态
+      setNodes(finalNodes);
+      setEdges(finalEdges);
+      setIsChainHighlighted(false);
+      setCurrentChainData(null);
+      
+      console.log('✅ 链式查询完成，高亮已清除');
+      setSnackbarMessage('链式查询完成！');
+      setSnackbarSeverity('success');
+      setSnackbarOpen(true);
+      
+      // 4. 使用最终的、干净的状态进行自动保存
+      try {
+        console.log('📤 链式查询完成后自动保存（已清除高亮）');
+        await saveData({ nodes: finalNodes, edges: finalEdges, showNotification: false });
+        console.log('✅ 链式查询后保存成功');
+      } catch (error) {
+        console.error('❌ 链式查询后保存失败:', error);
+        setSnackbarMessage('链式查询完成但保存失败: ' + error.message);
+        setSnackbarSeverity('error');
+        setSnackbarOpen(true);
+      }
+      
+    } catch (error) {
+      console.error('❌ 链式查询失败:', error);
+      
+      // 删除thinking节点
+      setNodes(currentNodes => currentNodes.filter(node => node.id !== thinkingNodeId));
+      setEdges(currentEdges => currentEdges.filter(edge => edge.target !== thinkingNodeId));
+      
+      // 解锁源节点
+      setNodeLocked(sourceNodeId, false);
+      
+      setSnackbarMessage('链式查询失败: ' + error.message);
+      setSnackbarSeverity('error');
+      setSnackbarOpen(true);
+
+      // 链式查询失败时，也直接移除临时节点
+      setNodes(currentNodes => currentNodes.filter(node => node.id !== thinkingNodeId));
+      setEdges(currentEdges => currentEdges.filter(edge => edge.target !== thinkingNodeId));
+    }
+  }, [isChainHighlighted, setNodeLocked, generateUniqueNodeId, callLLM, saveData, colors]);
+
+  // ==================================================================
+  // 节点创建和管理
+  // ==================================================================
+
   // 创建新节点（重构为通用函数）
-  const createNode = useCallback((content = null, position = null, extraData = {}) => {
+  const createNode = useCallback(async (content = null, position = null, extraData = {}, autoSave = true) => {
     // 使用传入的内容或输入框内容
     const nodeContent = content || inputValue.trim();
     if (!nodeContent) return null;
@@ -452,160 +698,99 @@ function Flow() {
       };
     }
     
-    const newNodeId = nodeId.toString();
+    const newNodeId = getNextNodeId();
+    
+    // 根据模式决定节点类型和数据
+    let nodeType = 'custom';
+    let nodeData = { 
+      label: nodeContent,
+      onAskLLM: (...args) => handleAskLLMRef.current?.(...args), // 直接设置回调
+      onChainedQuery: (...args) => handleChainedQueryRef.current?.(...args), // 添加链式查询回调
+      ...extraData // 支持额外数据（如锁定状态）
+    };
+    
+    if (isAnnotationMode) {
+      nodeType = 'textBlock';
+      nodeData = { 
+        label: nodeContent,
+        ...extraData 
+      };
+    }
+    
     const newNode = {
       id: newNodeId,
-      type: 'custom',
+      type: nodeType,
       position: nodePosition,
-      data: { 
-        label: nodeContent,
-        // 在这里我们不直接引用handleAskLLM，而是在后面通过updateNode设置
-        ...extraData // 支持额外数据（如锁定状态）
-      }
+      data: nodeData
     };
     
     setNodes((nds) => [...nds, newNode]);
-    setNodeId(prev => prev + 1);
-    console.log('创建节点:', newNode); // 调试日志
+    console.log('✨ 创建节点:', newNode);
     
-    // 只有手动创建时才隐藏输入框
+    // 只有手动创建时才隐藏输入框和重置状态
     if (!content) {
       setIsInputVisible(false);
       setInputValue('');
+      
+      // 如果是思考模式，创建节点后自动调用LLM
+      if (isThinkingMode) {
+        console.log('🤔 思考模式：创建节点后自动调用LLM');
+        // 不再使用setTimeout，直接调用
+        handleAskLLM(newNodeId, nodeContent);
+        setIsThinkingMode(false); // 重置思考模式
+      }
+      
+      // 重置标注模式
+      if (isAnnotationMode) {
+        setIsAnnotationMode(false);
+      }
+    }
+    
+    // 根据autoSave参数决定是否自动保存
+    if (autoSave && !isThinkingMode) { // 思考模式在handleAskLLM中保存
+      try {
+        console.log('📤 创建节点后自动保存');
+        await saveData({ showNotification: false });
+        console.log('✅ 节点创建后保存成功');
+      } catch (error) {
+        console.error('❌ 节点创建后保存失败:', error);
+        setSnackbarMessage('节点已创建，但保存失败: ' + error.message);
+        setSnackbarSeverity('error');
+        setSnackbarOpen(true);
+      }
+    } else {
+      console.log('⏭️ 跳过节点创建后的自动保存');
     }
     
     return newNodeId; // 返回新节点ID
-  }, [inputValue, inputPosition, nodeId, screenToFlowPosition]); // 移除handleAskLLM依赖
+  }, [inputValue, inputPosition, getNextNodeId, screenToFlowPosition, saveData, isThinkingMode, isAnnotationMode, handleAskLLM]);
 
-    // 处理Ask LLM请求 - 简化版本
-  const handleAskLLM = useCallback(async (sourceNodeId, nodeContent) => {
-    console.log('🚀 开始LLM请求，源节点ID:', sourceNodeId, '内容:', nodeContent);
-    
-    // 1. 立即锁定被提问的节点
-    setNodeLocked(sourceNodeId, true);
-    
-    // 2. 获取当前节点ID并生成thinking节点ID
-    const thinkingNodeId = nodeIdRef.current.toString();
-    console.log('🆔 生成thinking节点ID:', thinkingNodeId);
-    
-    // 3. 找到源节点并计算thinking节点位置
-    let sourceNode = null;
-    setNodes(currentNodes => {
-      console.log('📋 当前节点列表:', currentNodes.map(n => ({id: n.id, label: n.data.label})));
-      
-      sourceNode = currentNodes.find(node => node.id === sourceNodeId);
-      if (!sourceNode) {
-        console.error('❌ 找不到源节点:', sourceNodeId);
-        return currentNodes;
-      }
-      
-      // 计算thinking节点位置
-      const thinkingPosition = {
-        x: sourceNode.position.x + 150 + 50,
-        y: sourceNode.position.y
-      };
-      
-      console.log('📍 计算thinking节点位置:', thinkingPosition);
-      
-      // 创建thinking节点
-      const thinkingNode = {
-        id: thinkingNodeId,
-        type: 'custom',
-        position: thinkingPosition,
-        data: { 
-          label: "🤔 Thinking...",
-          isLocked: true,
-          onAskLLM: (...args) => handleAskLLMRef.current?.(...args)
-        }
-      };
-      
-      console.log('✨ 创建thinking节点:', thinkingNode);
-      
-      return [...currentNodes, thinkingNode];
-    });
-    
-    // 4. 更新nodeId
-    setNodeId(prev => prev + 1);
-    
-    // 5. 创建连接
-    const newEdge = {
-      id: `e${sourceNodeId}-${thinkingNodeId}`,
-      source: sourceNodeId,
-      target: thinkingNodeId,
-      type: 'smoothstep',
-      markerEnd: { type: 'arrowclosed', color: '#1976d2' },
-      style: { stroke: '#1976d2', strokeWidth: 2 }
-    };
-    
-    setEdges(eds => [...eds, newEdge]);
-    console.log('🔗 创建连接:', newEdge);
-    
-    // 6. 立即开始异步LLM调用
-    console.log('📞 开始LLM API调用...');
-    
-    try {
-      const llmResponse = await callLLM(nodeContent);
-      console.log('🎉 LLM API调用成功，响应长度:', llmResponse?.length);
-      
-      const finalContent = llmResponse.length > 200 ? 
-        llmResponse.substring(0, 200) + '...' : 
-        llmResponse;
-        
-      console.log('🔄 更新thinking节点内容...');
-      updateNode(thinkingNodeId, {
-        label: finalContent,
-        isLocked: false
-      });
-      
-      console.log('🔓 解锁源节点:', sourceNodeId);
-      setNodeLocked(sourceNodeId, false);
-      
-      setSnackbarMessage('LLM分析完成！');
-      setSnackbarSeverity('success');
-      setSnackbarOpen(true);
-      
-      console.log('✅ LLM流程完成');
-      
-      // 自动保存
-      setTimeout(() => saveData(false), 200);
-      
-    } catch (error) {
-      console.error('❌ LLM调用失败:', error);
-      
-      updateNode(thinkingNodeId, {
-        label: `❌ Error: ${error.message}`,
-        isLocked: false
-      });
-      
-      setNodeLocked(sourceNodeId, false);
-      
-      setSnackbarMessage('LLM调用失败: ' + error.message);
-      setSnackbarSeverity('error');
-      setSnackbarOpen(true);
-    }
-    
-    // 创建后立即自动保存
-    setTimeout(() => saveData(false), 100);
-    
-  }, [setNodeLocked, updateNode, saveData]); // 使用nodeIdRef，移除nodeId依赖
-
-  // 设置handleAskLLM引用
+  // 设置回调函数引用
   handleAskLLMRef.current = handleAskLLM;
+  handleChainedQueryRef.current = handleChainedQuery;
 
   // 数据加载函数
   const loadData = useCallback(async () => {
-    if (isLoading) return; // 防止重复加载
+    if (isLoading) {
+      console.log('正在加载中，跳过重复加载');
+      return;
+    }
     
     setIsLoading(true);
+    console.log('📥 开始加载数据，用户:', username);
     
     try {
-      const response = await fetch(`http://localhost:8000/load-data/${username}`);
+      const response = await fetch(`${API_BASE_URL}/load-data/${username}`);
       
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
       const data = await response.json();
+      console.log('📥 收到数据:', { 
+        nodesCount: data.nodes?.length || 0, 
+        edgesCount: data.edges?.length || 0 
+      });
       
       if (data.nodes && data.nodes.length > 0) {
         // 为加载的节点添加回调函数
@@ -613,55 +798,85 @@ function Flow() {
           ...node,
           data: {
             ...node.data,
-            onAskLLM: (...args) => handleAskLLMRef.current?.(...args)
+            onAskLLM: (...args) => handleAskLLMRef.current?.(...args),
+            onChainedQuery: (...args) => handleChainedQueryRef.current?.(...args)
+          }
+        }));
+        
+        // 为加载的边添加默认样式（如果缺失）
+        const edgesWithStyles = (data.edges || []).map(edge => ({
+          ...edge,
+          type: edge.type || 'smoothstep',
+          markerEnd: edge.markerEnd || {
+            type: 'arrowclosed',
+            color: colors.edge.default
+          },
+          style: edge.style || {
+            stroke: colors.edge.default,
+            strokeWidth: 2
           }
         }));
         
         setNodes(nodesWithCallbacks);
-        setEdges(data.edges || []);
+        setEdges(edgesWithStyles);
         setLastSaved(new Date(data.last_updated));
+        setDataLoaded(true); // 标记数据已加载
+        setHasLoadedUserData(true); // 标记已加载用户数据
         
         setSnackbarMessage(`数据加载成功！用户: ${username}`);
         setSnackbarSeverity('success');
         setSnackbarOpen(true);
+        console.log('✅ 数据加载成功，节点数:', nodesWithCallbacks.length, '边数:', edgesWithStyles.length);
       } else {
-        // 如果没有数据，保持初始状态
+        // 如果没有数据，标记为已加载但初始化为空
+        setNodes([]);
+        setEdges([]);
+        setDataLoaded(true); // 标记数据已加载（即使是空数据）
+        setHasLoadedUserData(false); // 没有加载到用户数据
         setSnackbarMessage(`欢迎新用户: ${username}`);
         setSnackbarSeverity('info');
         setSnackbarOpen(true);
+        console.log('📝 新用户，初始化为空数据');
       }
       
-      console.log('数据加载成功:', data);
-      
     } catch (error) {
-      console.error('数据加载失败:', error);
+      console.error('❌ 数据加载失败:', error);
       setSnackbarMessage('数据加载失败: ' + error.message);
       setSnackbarSeverity('error');
       setSnackbarOpen(true);
+      setDataLoaded(true); // 即使失败也标记为已尝试加载
+      setHasLoadedUserData(false); // 标记没有加载到用户数据
     } finally {
       setIsLoading(false);
     }
-  }, [username, isLoading]); // 移除状态更新函数依赖
+  }, [username, isLoading]);
 
-  // 初始化节点数据（仅在没有加载数据时使用）
+  // 初始化节点和边数据（仅在没有加载用户数据时使用）
   useEffect(() => {
-    const initializeNodes = () => {
+    const initializeData = () => {
       const nodesWithCallbacks = initialNodes.map(node => ({
         ...node,
         data: {
           ...node.data,
-          onAskLLM: (...args) => handleAskLLMRef.current?.(...args)
+          onAskLLM: (...args) => handleAskLLMRef.current?.(...args),
+          onChainedQuery: (...args) => handleChainedQueryRef.current?.(...args)
         }
       }));
       setNodes(nodesWithCallbacks);
+      setEdges(initialEdges); // 同时初始化边
+      console.log('🎯 初始化默认数据:', { nodes: nodesWithCallbacks, edges: initialEdges });
     };
     
-    // 仅在没有从数据库加载数据且没有现有节点时初始化
-    if (nodes.length === 0 && !isLoading && !lastSaved) {
-      initializeNodes();
+    // 只有在数据加载完成且没有加载到用户数据时才初始化默认数据
+    console.log('🔍 初始化检查:', { dataLoaded, hasLoadedUserData, nodesLength: nodes.length, edgesLength: edges.length, isLoading });
+    if (dataLoaded && !hasLoadedUserData && nodes.length === 0 && edges.length === 0 && !isLoading) {
+      console.log('🚀 初始化默认数据（新用户）');
+      initializeData();
+    } else if (dataLoaded && hasLoadedUserData) {
+      console.log('✅ 跳过初始化 - 已加载用户数据');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodes.length, isLoading, lastSaved]); // 简化依赖项
+  }, [dataLoaded, hasLoadedUserData, nodes.length, edges.length, isLoading]);
 
   // 处理连接
   const onConnect = useCallback((params) => {
@@ -670,10 +885,10 @@ function Flow() {
       type: 'smoothstep',
       markerEnd: {
         type: 'arrowclosed',
-        color: '#1976d2'
+        color: colors.edge.default
       },
       style: {
-        stroke: '#1976d2',
+        stroke: colors.edge.default,
         strokeWidth: 2
       }
     };
@@ -698,6 +913,13 @@ function Flow() {
       return;
     }
     
+    // 如果菜单当前可见，单击空白区域应该关闭菜单
+    if (isMenuVisible) {
+      console.log('菜单可见，点击空白区域关闭菜单');
+      setIsMenuVisible(false);
+      return;
+    }
+    
     const currentTime = Date.now();
     const timeDiff = currentTime - lastClickTimeRef.current;
     
@@ -713,21 +935,12 @@ function Flow() {
         clickTimeoutRef.current = null;
       }
       
-      // 显示浮动输入框
-      const flowPosition = screenToFlowPosition({ x: event.clientX, y: event.clientY });
-      console.log('双击位置:', flowPosition); // 调试日志
+      // 显示菜单而不是直接显示输入框
+      console.log('双击位置:', { x: event.clientX, y: event.clientY }); // 调试日志
       
-      // 设置输入框位置为鼠标点击位置
-      setInputPosition({ x: event.clientX, y: event.clientY });
-      setIsInputVisible(true);
-      setInputValue('');
-      
-      // 延迟聚焦，确保输入框已经渲染
-      setTimeout(() => {
-        if (inputRef.current) {
-          inputRef.current.focus();
-        }
-      }, 10);
+      // 设置菜单位置为鼠标点击位置
+      setMenuPosition({ x: event.clientX, y: event.clientY });
+      setIsMenuVisible(true);
       
       // 重置计数
       clickCountRef.current = 0;
@@ -750,49 +963,79 @@ function Flow() {
     }
     
     lastClickTimeRef.current = currentTime;
-  }, [screenToFlowPosition, isInputVisible]);
+  }, [screenToFlowPosition, isInputVisible, isMenuVisible]);
 
-  // 处理节点选择变化
+  // 处理选择变化（节点和边）
   const handleSelectionChange = useCallback((params) => {
     console.log('选择变化:', params); // 调试日志
     setSelectedNodes(params.nodes);
+    setSelectedEdges(params.edges);
   }, []);
 
   // 取消创建
   const cancelCreate = useCallback(() => {
     setIsInputVisible(false);
     setInputValue('');
+    setIsThinkingMode(false); // 重置思考模式
+    setIsAnnotationMode(false); // 重置标注模式
+  }, []);
+
+  // 菜单处理函数
+  const handleAddNote = useCallback(() => {
+    console.log('📝 选择添加普通笔记');
+    setIsThinkingMode(false);
+    setInputPosition({ x: menuPosition.x, y: menuPosition.y });
+    setIsInputVisible(true);
+    setInputValue('');
+  }, [menuPosition]);
+
+  const handleAddThinkingNote = useCallback(() => {
+    console.log('🤔 选择添加思考笔记');
+    setIsThinkingMode(true);
+    setInputPosition({ x: menuPosition.x, y: menuPosition.y });
+    setIsInputVisible(true);
+    setInputValue('');
+  }, [menuPosition]);
+
+  const handleAddAnnotation = useCallback(() => {
+    console.log('📝 选择添加原始标注');
+    setIsThinkingMode(false);
+    setIsAnnotationMode(true);
+    setInputPosition({ x: menuPosition.x, y: menuPosition.y });
+    setIsInputVisible(true);
+    setInputValue('');
+  }, [menuPosition]);
+
+  const handleCloseMenu = useCallback(() => {
+    setIsMenuVisible(false);
   }, []);
 
   // 处理键盘事件
-  const handleKeyDown = useCallback((event) => {
-    if (event.key === 'Enter') {
+  const handleKeyDown = useCallback(async (event) => {
+    if (event.key === 'Enter' && event.ctrlKey) {
+      // Ctrl+Enter 创建节点
       event.preventDefault();
-      const nodeId = createNode();
-      if (nodeId) {
-        // 为手动创建的节点设置回调函数
-        updateNode(nodeId, { onAskLLM: (...args) => handleAskLLMRef.current?.(...args) });
-        
-        // 手动创建节点后自动保存
-        setTimeout(() => {
-          saveData(false); // 静默保存
-        }, 100);
-      }
+      await createNode();
+      // console.log('🎯 手动创建节点完成:', nodeId);
     } else if (event.key === 'Escape') {
       event.preventDefault();
       cancelCreate();
     }
-  }, [createNode, cancelCreate, updateNode, saveData]);
+    // 单独的 Enter 键允许换行（不阻止默认行为）
+  }, [createNode, cancelCreate]);
 
   // 删除选中的节点
-  const deleteSelectedNodes = useCallback(() => {
+  const deleteSelectedNodes = useCallback(async () => {
     if (selectedNodes.length > 0) {
+      console.log('🗑️ 开始删除节点流程，选中节点数:', selectedNodes.length);
+      
       // 检查是否有锁定的节点
       const lockedNodeIds = selectedNodes
         .filter(node => node.data.isLocked)
         .map(node => node.id);
       
       if (lockedNodeIds.length > 0) {
+        console.log('❌ 有锁定的节点，无法删除:', lockedNodeIds);
         setSnackbarMessage(`无法删除锁定的节点: ${lockedNodeIds.join(', ')}`);
         setSnackbarSeverity('warning');
         setSnackbarOpen(true);
@@ -800,36 +1043,135 @@ function Flow() {
       }
       
       const selectedNodeIds = selectedNodes.map(node => node.id);
+      console.log('🗑️ 准备删除节点:', selectedNodeIds);
       
-      // 删除选中的节点
-      setNodes((nds) => nds.filter((node) => !selectedNodeIds.includes(node.id)));
+      // 预先计算删除后的数据
+      const currentNodes = nodes;
+      const currentEdges = edges;
       
-      // 删除与选中节点相关的边
-      setEdges((eds) => eds.filter((edge) => 
+      const filteredNodes = currentNodes.filter((node) => !selectedNodeIds.includes(node.id));
+      const filteredEdges = currentEdges.filter((edge) => 
         !selectedNodeIds.includes(edge.source) && !selectedNodeIds.includes(edge.target)
-      ));
+      );
       
+      console.log('🗑️ 删除后预计剩余节点数:', filteredNodes.length);
+      console.log('🗑️ 删除后预计剩余边数:', filteredEdges.length);
+      
+      // 更新状态
+      setNodes(filteredNodes);
+      setEdges(filteredEdges);
       setSelectedNodes([]);
-      console.log('删除节点:', selectedNodeIds); // 调试日志
       
-      // 删除节点后自动保存
-      setTimeout(() => {
-        saveData(false); // 静默保存
-      }, 100);
+      console.log('✅ 节点删除完成，准备保存');
+      
+      // 保存更新后的数据
+      const saveDeletedData = async () => {
+        try {
+          console.log('📡 准备保存删除后的数据:', {
+            username: username,
+            nodesCount: filteredNodes.length,
+            edgesCount: filteredEdges.length
+          });
+          
+          const response = await fetch(`${API_BASE_URL}/save-data`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              username: username,
+              nodes: filteredNodes,
+              edges: filteredEdges
+            })
+          });
+
+          if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+          }
+
+          const data = await response.json();
+          setLastSaved(new Date());
+          console.log('✅ 删除节点后保存成功:', data);
+          
+          setSnackbarMessage('节点删除并保存成功！');
+          setSnackbarSeverity('success');
+          setSnackbarOpen(true);
+          
+        } catch (error) {
+          console.error('❌ 删除节点后保存失败:', error);
+          setSnackbarMessage('删除成功但保存失败: ' + error.message);
+          setSnackbarSeverity('error');
+          setSnackbarOpen(true);
+        }
+      };
+      
+      // 延迟保存确保状态更新完成
+      setTimeout(saveDeletedData, 100);
+      
+    } else {
+      console.log('🗑️ 没有选中的节点，跳过删除');
     }
-  }, [selectedNodes, saveData]); // 重新添加saveData依赖
+  }, [selectedNodes, username, nodes, edges]);
+
+  // 删除选中的边
+  const deleteSelectedEdges = useCallback(async () => {
+    if (selectedEdges.length > 0) {
+      const selectedEdgeIds = selectedEdges.map(edge => edge.id);
+      
+      // 删除选中的边
+      setEdges((eds) => eds.filter((edge) => !selectedEdgeIds.includes(edge.id)));
+      
+      setSelectedEdges([]);
+      console.log('删除边:', selectedEdgeIds); // 调试日志
+      
+      setSnackbarMessage(`已删除 ${selectedEdgeIds.length} 条连线`);
+      setSnackbarSeverity('success');
+      setSnackbarOpen(true);
+      
+      // 删除边后立即保存
+      try {
+        console.log('📤 删除边后自动保存');
+        await saveData({ showNotification: false });
+        console.log('✅ 删除边后保存成功');
+      } catch (error) {
+        console.error('❌ 删除边后保存失败:', error);
+        setSnackbarMessage('连线已删除，但保存失败: ' + error.message);
+        setSnackbarSeverity('error');
+        setSnackbarOpen(true);
+      }
+    }
+  }, [selectedEdges, saveData]);
 
   // 键盘事件监听器
   useEffect(() => {
-    const handleGlobalKeyDown = (event) => {
+    const handleGlobalKeyDown = async (event) => {
       if (event.key === 'Delete' || event.key === 'Backspace') {
-        deleteSelectedNodes();
+        // 优先删除选中的节点，如果没有选中节点则删除选中的边
+        if (nodesRef.current.some(n => n.selected)) {
+          await deleteSelectedNodes();
+        } else if (edgesRef.current.some(e => e.selected)) {
+          await deleteSelectedEdges();
+        }
       }
       
       // Ctrl+S 保存快捷键
       if (event.ctrlKey && event.key === 's') {
         event.preventDefault(); // 阻止默认的保存网页行为
-        saveData();
+        await saveData();
+      }
+      
+      // Esc键清除链式高亮
+      if (event.key === 'Escape' && isChainHighlighted) {
+        console.log('🧹 按Esc键清除链式高亮');
+        const { nodes: clearedNodes, edges: clearedEdges } = clearChainHighlight(nodesRef.current, edgesRef.current, colors);
+        setNodes(clearedNodes);
+        setEdges(clearedEdges);
+        setIsChainHighlighted(false);
+        setCurrentChainData(null);
+        setSnackbarMessage('已清除链式高亮');
+        setSnackbarSeverity('info');
+        setSnackbarOpen(true);
       }
     };
 
@@ -837,7 +1179,7 @@ function Flow() {
     return () => {
       document.removeEventListener('keydown', handleGlobalKeyDown);
     };
-  }, [deleteSelectedNodes, saveData]);
+  }, [deleteSelectedNodes, deleteSelectedEdges, saveData, isChainHighlighted, colors]);
 
   // 清理定时器
   useEffect(() => {
@@ -850,9 +1192,10 @@ function Flow() {
 
   // 初始化数据加载
   useEffect(() => {
-    hasInitializedRef.current = false; // 重置初始化状态
+    console.log('🔄 初始化数据加载效果触发，用户:', username, '已初始化:', hasInitializedRef.current);
     if (!hasInitializedRef.current) {
       hasInitializedRef.current = true;
+      console.log('🚀 开始初始化数据加载');
       loadData();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -878,6 +1221,7 @@ function Flow() {
       }
     }}>
       {globalStyles}
+      {NodeGlobalStyles}
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -904,37 +1248,43 @@ function Flow() {
           height: '100%'
         }}
       >
-        <Background color="#e0e0e0" gap={20} />
+        <Background color={canvasColors.background} gap={canvasColors.grid} />
         <Controls />
       </ReactFlow>
 
+      {/* 双击菜单 */}
+      {isMenuVisible && (
+        <Menu
+          position={menuPosition}
+          onAddNote={handleAddNote}
+          onAddThinkingNote={handleAddThinkingNote}
+          onAddAnnotation={handleAddAnnotation}
+          onClose={handleCloseMenu}
+        />
+      )}
+
       {/* 浮动输入框 */}
       {isInputVisible && (
-        <Paper
-          elevation={8}
-          sx={{
-            position: 'fixed',
-            left: inputPosition.x,
-            top: inputPosition.y,
-            transform: 'translate(-50%, -50%)',
-            zIndex: 1000,
-            borderRadius: '8px',
-            overflow: 'hidden',
-            boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
-            border: '1px solid #e0e0e0'
-          }}
-        >
+        <FloatingPanel position={inputPosition}>
           <TextField
             ref={inputRef}
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="输入节点内容..."
+            placeholder={
+              isThinkingMode ? "输入思考内容（将自动生成LLM分析）..." : 
+              isAnnotationMode ? "输入原始标注内容..." : 
+              "输入节点内容..."
+            }
             variant="outlined"
             size="small"
             autoComplete="off"
+            autoFocus={true}
+            multiline
+            maxRows={8}
             sx={{
               minWidth: '250px',
+              maxWidth: '400px',
               '& .MuiOutlinedInput-root': {
                 paddingRight: 0,
                 '& fieldset': {
@@ -949,127 +1299,75 @@ function Flow() {
               },
               '& .MuiInputBase-input': {
                 padding: '12px 16px',
-                fontSize: '14px',
+                fontSize: fonts.components.input.fontSize,
+                fontWeight: fonts.components.input.fontWeight,
+                lineHeight: fonts.components.input.lineHeight,
+                fontFamily: fonts.components.input.fontFamily,
               },
             }}
             InputProps={{
               endAdornment: (
                 <InputAdornment position="end">
-                  <IconButton
-                    onClick={() => createNode()}
-                    edge="end"
-                    size="small"
-                    sx={{
-                      backgroundColor: '#1976d2',
-                      color: 'white',
-                      borderRadius: '4px',
-                      margin: '4px',
-                      padding: '6px',
-                      '&:hover': {
-                        backgroundColor: '#1565c0',
-                      },
+                  <RoundIconButton
+                    onClick={async () => {
+                      // 确保createNode是异步的
+                      await createNode();
                     }}
+                    size="small"
+                    color={
+                      isThinkingMode ? "secondary" : 
+                      isAnnotationMode ? "warning" : 
+                      "primary"
+                    }
                   >
                     <EnterIcon fontSize="small" />
-                  </IconButton>
+                  </RoundIconButton>
                 </InputAdornment>
               ),
             }}
           />
-        </Paper>
+        </FloatingPanel>
       )}
 
       {/* 信息面板 */}
-      <Paper
-        elevation={3}
-        sx={{
-          position: 'absolute',
-          top: 16,
-          right: 16,
-          maxWidth: 300,
-          p: 2,
-          borderRadius: '12px',
-          backgroundColor: 'rgba(255,255,255,0.95)',
-          backdropFilter: 'blur(10px)'
-        }}
-      >
-        <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-          <InfoIcon color="primary" sx={{ mr: 1, fontSize: '1.2rem' }} />
-          <Typography variant="h6" sx={{ fontSize: '1rem', fontWeight: 600 }}>
-            操作说明
-          </Typography>
-        </Box>
-        <Box sx={{ fontSize: '0.875rem', color: 'text.secondary' }}>
-          <Typography variant="body2" sx={{ mb: 0.5 }}>
-            • 双击空白区域弹出输入框
-          </Typography>
-          <Typography variant="body2" sx={{ mb: 0.5 }}>
-            • 输入内容后按Enter键或点击蓝色按钮创建节点
-          </Typography>
-          <Typography variant="body2" sx={{ mb: 0.5 }}>
-            • 按Esc键或点击空白区域取消输入
-          </Typography>
-          <Typography variant="body2" sx={{ mb: 0.5 }}>
-            • 右键点击节点询问LLM，立即生成"Thinking"节点
-          </Typography>
-          <Typography variant="body2" sx={{ mb: 0.5 }}>
-            • 拖拽节点右侧圆点连接到其他节点
-          </Typography>
-          <Typography variant="body2" sx={{ mb: 0.5 }}>
-            • 左键拖拽移动节点，右键拖拽平移画布
-          </Typography>
-          <Typography variant="body2" sx={{ mb: 0.5 }}>
-            • 选中节点后按Delete键删除（锁定节点不可删除）
-          </Typography>
-          <Typography variant="body2" sx={{ mb: 0.5, color: 'primary.main' }}>
-            • Ctrl+S 手动保存数据
-          </Typography>
-          <Typography variant="body2" sx={{ mb: 0.5, color: 'success.main' }}>
-            • 创建/删除节点时自动保存
-          </Typography>
-          <Typography variant="body2" sx={{ mb: 0.5, color: 'warning.main' }}>
-            • 橙色边框表示节点已锁定，正在处理中
-          </Typography>
-        </Box>
-      </Paper>
+      <InfoPanel
+        title="操作说明"
+        icon={<InfoIcon />}
+        items={[
+          "• 双击空白区域弹出创建菜单",
+          "• 选择'添加笔记'创建普通节点",
+          "• 选择'添加思考笔记'创建节点并自动生成LLM分析",
+          "• 选择'添加原始标注'创建半透明文本块（无连接点）",
+          "• 输入内容后按Ctrl+Enter或点击按钮创建节点",
+          "• 单独按Enter键可换行，按Esc键或点击空白区域取消输入",
+          "• 右键点击节点询问LLM，立即生成'Thinking'节点",
+          "• 右键点击节点选择'链式查询'，追踪整个思维链路",
+          "• 按Esc键清除链式高亮",
+          "• 拖拽节点右侧圆点连接到其他节点",
+          "• 左键拖拽移动节点，右键拖拽平移画布",
+          "• 选中节点后按Delete键删除（锁定节点不可删除）",
+          "• 点击连线按Delete键删除连线",
+          { text: "• Ctrl+S 手动保存数据", color: colors.primary.main },
+          { text: "• 创建/删除节点时自动保存", color: colors.success.main },
+          { text: "• 橙色边框表示节点已锁定，正在处理中", color: colors.warning.main }
+        ]}
+      />
 
       {/* 用户状态面板 */}
-      <Paper
-        elevation={3}
-        sx={{
-          position: 'absolute',
-          top: 16,
-          left: 16,
-          minWidth: 200,
-          p: 2,
-          borderRadius: '12px',
-          backgroundColor: 'rgba(255,255,255,0.95)',
-          backdropFilter: 'blur(10px)'
+      <StatusPanel
+        title="用户状态"
+        icon={<PsychologyIcon />}
+        status={{
+          "用户": username,
+          "节点数": nodes.length,
+          "连接数": edges.length,
+          "选中节点": selectedNodes.length,
+          "选中连线": selectedEdges.length,
+          "状态": isSaving ? '正在保存...' : 
+                   isLoading ? '正在加载...' : 
+                   lastSaved ? `上次保存: ${lastSaved.toLocaleTimeString()}` : '未保存'
         }}
-      >
-        <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-          <PsychologyIcon color="primary" sx={{ mr: 1, fontSize: '1.2rem' }} />
-          <Typography variant="h6" sx={{ fontSize: '1rem', fontWeight: 600 }}>
-            用户状态
-          </Typography>
-        </Box>
-        <Box sx={{ fontSize: '0.875rem', color: 'text.secondary' }}>
-          <Typography variant="body2" sx={{ mb: 0.5 }}>
-            用户: {username}
-          </Typography>
-          <Typography variant="body2" sx={{ mb: 0.5 }}>
-            节点数: {nodes.length}
-          </Typography>
-          <Typography variant="body2" sx={{ mb: 0.5 }}>
-            连接数: {edges.length}
-          </Typography>
-          <Typography variant="body2" sx={{ mb: 0.5 }}>
-            {isSaving ? '正在保存...' : 
-             isLoading ? '正在加载...' : 
-             lastSaved ? `上次保存: ${lastSaved.toLocaleTimeString()}` : '未保存'}
-          </Typography>
-        </Box>
-      </Paper>
+      />
 
       {/* 通知组件 */}
       <Snackbar
