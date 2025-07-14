@@ -2,35 +2,50 @@ import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import { Typography, Box } from '@mui/material';
 import { colors } from '../../theme/colors';
+import remarkGfm from 'remark-gfm';
 
 // 自定义 markdown 组件映射
 const components = {
   // 段落
-  p: ({ node, ...props }) => (
-    <Typography 
-      variant="body2" 
-      component="p" 
-      sx={{ 
-        margin: '0.5em 0',
-        lineHeight: 1.4,
-        color: colors.text.secondary,
-        fontSize: '14px',
-        '&:first-of-type': { marginTop: 0 },
-        '&:last-of-type': { marginBottom: 0 }
-      }}
-      {...props}
-    />
-  ),
+  p: ({ node, children, color, ...props }) => {
+    // 检查节点是否包含代码块
+    const hasCodeBlock = node.children && node.children.some(child => 
+      child.type === 'code' && !child.inline
+    );
+    
+    // 如果包含代码块，直接返回子元素而不包装在段落中
+    if (hasCodeBlock) {
+      return <>{children}</>;
+    }
+    
+    return (
+      <Typography 
+        variant="body2" 
+        component="div" 
+        sx={{ 
+          margin: '0.8em 0',
+          lineHeight: 1.6,
+          color: color || colors.text.secondary,
+          fontSize: '14px',
+          '&:first-of-type': { marginTop: 0 },
+          '&:last-of-type': { marginBottom: 0 }
+        }}
+        {...props}
+      >
+        {children}
+      </Typography>
+    );
+  },
   
   // 标题
-  h1: ({ node, ...props }) => (
+  h1: ({ node, color, ...props }) => (
     <Typography 
       variant="h6" 
       component="h1" 
       sx={{ 
         margin: '0.8em 0 0.4em 0',
         fontWeight: 600,
-        color: colors.primary.main,
+        color: color || colors.primary.main,
         fontSize: '18px',
         lineHeight: 1.3,
         '&:first-of-type': { marginTop: 0 }
@@ -39,14 +54,14 @@ const components = {
     />
   ),
   
-  h2: ({ node, ...props }) => (
+  h2: ({ node, color, ...props }) => (
     <Typography 
       variant="h6" 
       component="h2" 
       sx={{ 
         margin: '0.7em 0 0.3em 0',
         fontWeight: 600,
-        color: colors.primary.main,
+        color: color || colors.primary.main,
         fontSize: '16px',
         lineHeight: 1.3,
         '&:first-of-type': { marginTop: 0 }
@@ -55,14 +70,14 @@ const components = {
     />
   ),
   
-  h3: ({ node, ...props }) => (
+  h3: ({ node, color, ...props }) => (
     <Typography 
       variant="subtitle1" 
       component="h3" 
       sx={{ 
         margin: '0.6em 0 0.3em 0',
         fontWeight: 600,
-        color: colors.primary.main,
+        color: color || colors.primary.main,
         fontSize: '15px',
         lineHeight: 1.3,
         '&:first-of-type': { marginTop: 0 }
@@ -72,24 +87,24 @@ const components = {
   ),
   
   // 强调
-  strong: ({ node, ...props }) => (
+  strong: ({ node, color, ...props }) => (
     <Typography 
       component="strong" 
       sx={{ 
         fontWeight: 600,
-        color: colors.text.primary,
+        color: color || colors.text.primary,
         fontSize: 'inherit'
       }}
       {...props}
     />
   ),
   
-  em: ({ node, ...props }) => (
+  em: ({ node, color, ...props }) => (
     <Typography 
       component="em" 
       sx={{ 
         fontStyle: 'italic',
-        color: colors.text.secondary,
+        color: color || colors.text.secondary,
         fontSize: 'inherit'
       }}
       {...props}
@@ -97,7 +112,7 @@ const components = {
   ),
   
   // 代码
-  code: ({ node, inline, ...props }) => {
+  code: ({ node, inline, children, ...props }) => {
     if (inline) {
       return (
         <Typography 
@@ -109,10 +124,13 @@ const components = {
             fontSize: '13px',
             fontFamily: '"Fira Code", "Consolas", monospace',
             color: colors.secondary.main,
-            border: `1px solid ${colors.panel.border}`
+            border: `1px solid ${colors.panel.border}`,
+            whiteSpace: 'nowrap'
           }}
           {...props}
-        />
+        >
+          {children}
+        </Typography>
       );
     }
     
@@ -129,6 +147,8 @@ const components = {
           fontFamily: '"Fira Code", "Consolas", monospace',
           color: colors.text.secondary,
           border: `1px solid ${colors.panel.border}`,
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
           '&:first-of-type': { marginTop: 0 },
           '&:last-of-type': { marginBottom: 0 }
         }}
@@ -138,10 +158,14 @@ const components = {
           sx={{
             fontSize: 'inherit',
             fontFamily: 'inherit',
-            color: 'inherit'
+            color: 'inherit',
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word'
           }}
           {...props}
-        />
+        >
+          {children}
+        </Typography>
       </Box>
     );
   },
@@ -173,12 +197,12 @@ const components = {
     />
   ),
   
-  li: ({ node, ...props }) => (
+  li: ({ node, color, ...props }) => (
     <Typography 
       component="li" 
       sx={{ 
         margin: '0.2em 0',
-        color: colors.text.secondary,
+        color: color || colors.text.secondary,
         fontSize: '14px',
         lineHeight: 1.4
       }}
@@ -207,15 +231,15 @@ const components = {
   ),
   
   // 链接
-  a: ({ node, ...props }) => (
+  a: ({ node, color, ...props }) => (
     <Typography 
       component="a" 
       sx={{ 
-        color: colors.primary.main,
+        color: color || colors.primary.main,
         textDecoration: 'underline',
         fontSize: 'inherit',
         '&:hover': {
-          color: colors.primary.dark
+          color: color || colors.primary.dark
         }
       }}
       {...props}
@@ -239,7 +263,12 @@ const components = {
 };
 
 // Markdown 渲染器组件
-export const MarkdownRenderer = ({ content, sx = {} }) => {
+export const MarkdownRenderer = ({ content, sx = {}, color }) => {
+  // 包装components，使每个都自动获得color prop
+  const coloredComponents = {};
+  Object.keys(components).forEach(key => {
+    coloredComponents[key] = (props) => components[key]({ ...props, color });
+  });
   return (
     <Box 
       sx={{
@@ -249,7 +278,8 @@ export const MarkdownRenderer = ({ content, sx = {} }) => {
       }}
     >
       <ReactMarkdown 
-        components={components}
+        components={coloredComponents}
+        remarkPlugins={[remarkGfm]}
         skipHtml={true} // 跳过 HTML 标签，只渲染 markdown
       >
         {content}

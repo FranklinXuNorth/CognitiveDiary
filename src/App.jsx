@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import ReactFlow, {
   ReactFlowProvider,
   useReactFlow,
@@ -35,9 +35,13 @@ import {
   nodeTypes, 
   initialNodes, 
   initialEdges, 
-  NodeGlobalStyles 
+  NodeGlobalStyles,
+  NodeFeature,
+  NodeType
 } from './assets/components/CustomNode';
+import { CustomEdge } from './assets/components/CustomEdge';
 import Menu from './assets/components/Menu';
+import SelectionBox from './assets/components/SelectionBox';
 import { traceNodeChain, applyChainHighlight, clearChainHighlight } from './utils/nodeUtils';
 
 // http://localhost:8000/chat
@@ -128,6 +132,14 @@ const globalStyles = (
   />
 );
 
+// 交互模式枚举
+const InteractionMode = {
+  NORMAL: 'normal',           // 正常状态
+  SELECTING: 'selecting',     // 选中节点状态
+  BOX_SELECTING: 'boxSelecting', // 框选状态
+  DRAGGING: 'dragging'        // 拖拽状态
+};
+
 function Flow() {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
@@ -145,7 +157,7 @@ function Flow() {
   const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
   const [isThinkingMode, setIsThinkingMode] = useState(false); // 标记是否为思考模式
   const [isAnnotationMode, setIsAnnotationMode] = useState(false); // 标记是否为标注模式
-  const { screenToFlowPosition } = useReactFlow();
+  const { screenToFlowPosition, getViewport } = useReactFlow();
   const inputRef = useRef(null);
   
   // 用户名和数据同步相关状态
@@ -159,9 +171,16 @@ function Flow() {
 
   // 使用useRef来持有最新的节点和边状态，避免在回调中出现闭包问题
   const nodesRef = useRef(nodes);
-  nodesRef.current = nodes;
   const edgesRef = useRef(edges);
-  edgesRef.current = edges;
+  
+  // 使用 useEffect 确保 nodesRef 和 edgesRef 始终是最新的
+  useEffect(() => {
+    nodesRef.current = nodes;
+  }, [nodes]);
+  
+  useEffect(() => {
+    edgesRef.current = edges;
+  }, [edges]);
   
   // 节点锁定状态管理
   const [lockedNodes, setLockedNodes] = useState(new Set());
@@ -170,16 +189,49 @@ function Flow() {
   const [isChainHighlighted, setIsChainHighlighted] = useState(false);
   const [currentChainData, setCurrentChainData] = useState(null);
   
+  // 序号管理
+  const [nextNodeIndex, setNextNodeIndex] = useState(1);
+  const [nextEdgeIndex, setNextEdgeIndex] = useState(1);
+  
   // 自定义双击检测
   const clickTimeoutRef = useRef(null);
   const clickCountRef = useRef(0);
   const lastClickTimeRef = useRef(0);
+  
+  // 新的交互状态管理
+  const [interactionMode, setInteractionMode] = useState(InteractionMode.NORMAL);
+  const [boxSelectedNodes, setBoxSelectedNodes] = useState(new Set()); // 框选中的节点
+  const [selectionGroupIds, setSelectionGroupIds] = useState(new Set()); // 当前组选中的节点
+  
+  // 全局编辑状态管理
+  const [isAnyNodeEditing, setIsAnyNodeEditing] = useState(false);
+  
+  // 框选相关状态
+  const [isSelecting, setIsSelecting] = useState(false);
+  const [selectionStart, setSelectionStart] = useState(null);
+  const [selectionEnd, setSelectionEnd] = useState(null);
+  const [isDraggingNode, setIsDraggingNode] = useState(false);
+  
+  // 拖拽相关状态
+  const [dragStartPosition, setDragStartPosition] = useState(null);
+  const [dragStartNodes, setDragStartNodes] = useState([]);
+  
+  // 边类型定义 - 使用useMemo避免重新创建
+  const edgeTypes = useMemo(() => ({
+    custom: CustomEdge
+  }), []);
+  
+  // 节点类型定义 - 使用useMemo避免重新创建
+  const memoizedNodeTypes = useMemo(() => nodeTypes, []);
   
   // handleAskLLM函数引用，避免循环依赖
   const handleAskLLMRef = useRef(null);
   
   // handleChainedQuery函数引用，避免循环依赖
   const handleChainedQueryRef = useRef(null);
+  
+  // handleNodeEdit函数引用，避免循环依赖
+  const handleNodeEditRef = useRef(null);
   
   // 生成唯一节点ID的函数
   const generateUniqueNodeId = useCallback((currentNodes = []) => {
@@ -274,15 +326,17 @@ function Flow() {
       showNotification = true 
     } = options;
     
+    // 优先用参数，否则用最新 ref
     const nodesToSave = nodesToSaveParam || nodesRef.current;
     const edgesToSave = edgesToSaveParam || edgesRef.current;
 
-
-    console.log('📤 开始保存数据:', { 
+    console.log('�� 开始保存数据:', { 
       username, 
       nodesCount: nodesToSave.length, 
       edgesCount: edgesToSave.length,
-      showNotification
+      showNotification,
+      nodesToSaveSource: nodesToSaveParam ? 'explicit' : 'ref',
+      edgesToSaveSource: edgesToSaveParam ? 'explicit' : 'ref'
     });
     
     try {
@@ -292,7 +346,12 @@ function Flow() {
         edges: edgesToSave
       };
       
-      console.log('📡 发送保存请求到后端...', requestData);
+      console.log('📡 发送保存请求到后端...', {
+        username: requestData.username,
+        nodesCount: requestData.nodes.length,
+        edgesCount: requestData.edges.length,
+        nodeIds: requestData.nodes.map(n => n.id)
+      });
       
       const response = await fetch(`${API_BASE_URL}/save-data`, {
         method: 'POST',
@@ -339,14 +398,24 @@ function Flow() {
     } finally {
       setIsSaving(false);
     }
-  }, [username, isSaving]);
+  }, [username, isSaving, nodes, edges]);
 
   // 更新节点内容
   const updateNode = useCallback((nodeId, newData) => {
     setNodes((nds) => 
       nds.map(node => 
         node.id === nodeId 
-          ? { ...node, data: { ...node.data, ...newData } }
+          ? { 
+              ...node, 
+              data: { 
+                ...node.data, 
+                ...newData,
+                // 确保回调函数不被覆盖
+                onAskLLM: node.data.onAskLLM,
+                onChainedQuery: node.data.onChainedQuery,
+                onEdit: node.data.onEdit
+              } 
+            }
           : node
       )
     );
@@ -356,6 +425,53 @@ function Flow() {
   const setNodeLocked = useCallback((nodeId, locked) => {
     updateNode(nodeId, { isLocked: locked });
   }, [updateNode]);
+
+  // 处理节点编辑
+  const handleNodeEdit = useCallback(async (nodeId, newContent) => {
+    console.log('✏️ 开始编辑节点:', nodeId, '新内容:', newContent);
+    
+    // 使用 setNodes 的 callback 方式，确保保存时使用最新的节点数据
+    setNodes(nds => {
+      const updated = nds.map(node =>
+        node.id === nodeId
+          ? {
+              ...node,
+              data: {
+                ...node.data,
+                label: newContent,
+                // 确保回调函数不被覆盖
+                onAskLLM: node.data.onAskLLM,
+                onChainedQuery: node.data.onChainedQuery,
+                onEdit: node.data.onEdit,
+                onEditingStateChange: node.data.onEditingStateChange
+              }
+            }
+          : node
+      );
+      
+      // 在 setNodes 的 callback 中直接保存，确保使用最新的节点数据
+      console.log('📤 编辑后立即保存最新数据');
+      saveData({ nodes: updated, showNotification: false }).then(() => {
+        console.log('✅ 编辑后保存成功');
+        setSnackbarMessage('节点编辑成功！');
+        setSnackbarSeverity('success');
+        setSnackbarOpen(true);
+      }).catch((error) => {
+        console.error('❌ 编辑后保存失败:', error);
+        setSnackbarMessage('编辑成功但保存失败: ' + error.message);
+        setSnackbarSeverity('error');
+        setSnackbarOpen(true);
+      });
+      
+      return updated;
+    });
+  }, [saveData, setSnackbarMessage, setSnackbarSeverity, setSnackbarOpen]);
+
+  // 处理编辑状态变化
+  const handleEditingStateChange = useCallback((isEditing) => {
+    setIsAnyNodeEditing(isEditing);
+    console.log('📝 编辑状态变化:', isEditing);
+  }, []);
 
   // ==================================================================
   // LLM 和链式查询相关函数
@@ -391,8 +507,12 @@ function Flow() {
       position: thinkingPosition,
       data: { 
         label: "🤔 Thinking...",
+        nodeIndex: nextNodeIndex, // 添加节点序号
         isLocked: true,
-        onAskLLM: (...args) => handleAskLLMRef.current?.(...args)
+        onAskLLM: (...args) => handleAskLLMRef.current?.(...args),
+        onChainedQuery: (...args) => handleChainedQueryRef.current?.(...args),
+        onEdit: (...args) => handleNodeEditRef.current?.(...args),
+        onEditingStateChange: handleEditingStateChange // 添加编辑状态变化回调
       }
     };
     
@@ -400,24 +520,33 @@ function Flow() {
       id: `llm-${sourceNodeId}-${thinkingNodeId}`,
       source: sourceNodeId,
       target: thinkingNodeId,
-      type: 'smoothstep',
+      type: 'custom', // 使用自定义边类型
+      data: {
+        edgeIndex: nextEdgeIndex // 添加边序号
+      },
       markerEnd: { 
         type: 'arrowclosed', 
-        color: colors.edge.default 
+        color: colors.highlight.chain 
       },
       style: { 
-        stroke: colors.edge.default, 
-        strokeWidth: 2 
-      }
+        stroke: colors.highlight.chain, 
+        strokeWidth: 4,
+        filter: `drop-shadow(0 0 5px ${colors.highlight.chain}90)`,
+        strokeDasharray: '5,5',
+        animation: 'chainEdgeFlow 1s linear infinite'
+      },
+      className: 'chain-edge-animated'
     };
     
     // 3. 在本地状态中添加 thinking 节点和边（不保存）
     setNodes(currentNodes => [...currentNodes, thinkingNode]);
+    setNextNodeIndex(prev => prev + 1); // 增加节点序号
     setEdges(currentEdges => {
       const edgeExists = currentEdges.some(edge => edge.id === newEdge.id);
       if (edgeExists) {
         return currentEdges;
       }
+      setNextEdgeIndex(prev => prev + 1); // 增加边序号
       return [...currentEdges, newEdge];
     });
     
@@ -436,8 +565,32 @@ function Flow() {
         return node;
       });
 
-      // 6. 使用最新状态更新UI
+      // 6. 清除LLM查询边的动画效果
+      const finalEdges = edgesRef.current.map(edge => {
+        if (edge.id === `llm-${sourceNodeId}-${thinkingNodeId}`) {
+          return {
+            ...edge,
+            style: {
+              ...edge.style,
+              stroke: colors.edge.default,
+              strokeWidth: 2,
+              filter: undefined,
+              strokeDasharray: undefined,
+              animation: undefined
+            },
+            markerEnd: {
+              ...edge.markerEnd,
+              color: colors.edge.default
+            },
+            className: undefined
+          };
+        }
+        return edge;
+      });
+
+      // 7. 使用最新状态更新UI
       setNodes(finalNodes);
+      setEdges(finalEdges);
 
       setSnackbarMessage('LLM分析完成！');
       setSnackbarSeverity('success');
@@ -445,7 +598,7 @@ function Flow() {
       
       // 7. 此时执行唯一的一次保存，并传入最新的节点状态
       try {
-        console.log('📤 LLM成功后，执行最终保存');
+        console.log('📤 LLM成功后，执行最终保存（包含thinking节点）');
         // 直接传递最新的nodes状态，edges状态没有变化，使用ref里的即可
         await saveData({ nodes: finalNodes, showNotification: false });
         console.log('✅ LLM成功后保存成功');
@@ -528,8 +681,11 @@ function Flow() {
       temperature: 0.7
     };
     
-    // 锁定源节点
-    setNodeLocked(sourceNodeId, true);
+    // 🔒 锁定所有链式节点
+    console.log('🔒 锁定所有链式节点:', chainNodes.map(node => node.id));
+    chainNodes.forEach(node => {
+      setNodeLocked(node.id, true);
+    });
     
     // 生成thinking节点ID和位置
     let thinkingNodeId = null;
@@ -556,8 +712,10 @@ function Flow() {
       position: thinkingPosition,
       data: {
         label: '🔗 Chained Thinking...',
+        nodeIndex: nextNodeIndex, // 添加节点序号
         onAskLLM: (...args) => handleAskLLMRef.current?.(...args),
         onChainedQuery: (...args) => handleChainedQueryRef.current?.(...args),
+        onEdit: (...args) => handleNodeEditRef.current?.(...args),
         isLocked: true
       }
     };
@@ -567,7 +725,10 @@ function Flow() {
       id: `chain-${sourceNodeId}-${thinkingNodeId}`,
       source: sourceNodeId,
       target: thinkingNodeId,
-      type: 'smoothstep',
+      type: 'custom', // 使用自定义边类型
+      data: {
+        edgeIndex: nextEdgeIndex // 添加边序号
+      },
       markerEnd: {
         type: 'arrowclosed',
         color: colors.edge.default
@@ -580,6 +741,7 @@ function Flow() {
     
     // 分别更新节点和边缘，避免嵌套调用
     setNodes(currentNodes => [...currentNodes, thinkingNode]);
+    setNextNodeIndex(prev => prev + 1); // 增加节点序号
     
     // 更新边列表 - 添加重复检查
     setEdges(currentEdges => {
@@ -590,6 +752,7 @@ function Flow() {
         return currentEdges; // 返回原数组，不添加重复边缘
       }
       
+      setNextEdgeIndex(prev => prev + 1); // 增加边序号
       console.log('✅ 链式查询 - 添加新边缘:', { id: newEdge.id, source: newEdge.source, target: newEdge.target });
       console.log('🔍 链式查询 - 添加前边数:', currentEdges.length, '添加后边数:', currentEdges.length + 1);
       return [...currentEdges, newEdge];
@@ -618,7 +781,8 @@ function Flow() {
         if (node.id === thinkingNodeId) {
           return { ...node, data: { ...node.data, label: llmResponse, isLocked: false } };
         }
-        if (node.id === sourceNodeId) {
+        // 🔓 解锁所有链式节点
+        if (chainNodes.some(chainNode => chainNode.id === node.id)) {
           return { ...node, data: { ...node.data, isLocked: false } };
         }
         return node;
@@ -662,8 +826,11 @@ function Flow() {
       setNodes(currentNodes => currentNodes.filter(node => node.id !== thinkingNodeId));
       setEdges(currentEdges => currentEdges.filter(edge => edge.target !== thinkingNodeId));
       
-      // 解锁源节点
-      setNodeLocked(sourceNodeId, false);
+      // 🔓 解锁所有链式节点
+      console.log('🔓 链式查询失败，解锁所有链式节点:', chainNodes.map(node => node.id));
+      chainNodes.forEach(node => {
+        setNodeLocked(node.id, false);
+      });
       
       setSnackbarMessage('链式查询失败: ' + error.message);
       setSnackbarSeverity('error');
@@ -704,27 +871,35 @@ function Flow() {
     let nodeType = 'custom';
     let nodeData = { 
       label: nodeContent,
+      nodeIndex: nextNodeIndex, // 添加节点序号
       onAskLLM: (...args) => handleAskLLMRef.current?.(...args), // 直接设置回调
       onChainedQuery: (...args) => handleChainedQueryRef.current?.(...args), // 添加链式查询回调
+      onEdit: (...args) => handleNodeEditRef.current?.(...args), // 添加编辑回调
+      onEditingStateChange: handleEditingStateChange, // 添加编辑状态变化回调
       ...extraData // 支持额外数据（如锁定状态）
     };
     
     if (isAnnotationMode) {
-      nodeType = 'textBlock';
+      nodeType = 'custom';
       nodeData = { 
         label: nodeContent,
+        nodeType: 'annotation', // 设置为原始标注类型
+        features: ['edit'], // 只包含编辑功能
+        onEdit: (...args) => handleNodeEditRef.current?.(...args), // 添加编辑回调
+        onEditingStateChange: handleEditingStateChange, // 添加编辑状态变化回调
         ...extraData 
       };
     }
-    
+
     const newNode = {
       id: newNodeId,
       type: nodeType,
       position: nodePosition,
       data: nodeData
     };
-    
+
     setNodes((nds) => [...nds, newNode]);
+    setNextNodeIndex(prev => prev + 1); // 增加节点序号
     console.log('✨ 创建节点:', newNode);
     
     // 只有手动创建时才隐藏输入框和重置状态
@@ -735,8 +910,24 @@ function Flow() {
       // 如果是思考模式，创建节点后自动调用LLM
       if (isThinkingMode) {
         console.log('🤔 思考模式：创建节点后自动调用LLM');
-        // 不再使用setTimeout，直接调用
-        handleAskLLM(newNodeId, nodeContent);
+        console.log('🤔 节点ID:', newNodeId, '节点内容:', nodeContent);
+        console.log('🤔 handleAskLLMRef.current 存在:', !!handleAskLLMRef.current);
+        
+        // 使用setTimeout确保节点状态更新完成后再调用LLM
+        setTimeout(() => {
+          console.log('🤔 延迟调用LLM，确保节点已创建');
+          console.log('🤔 当前节点列表:', nodesRef.current.map(n => ({ id: n.id, label: n.data.label })));
+          
+          // 使用ref调用，避免循环依赖
+          if (handleAskLLMRef.current) {
+            console.log('🤔 开始调用handleAskLLM...');
+            handleAskLLMRef.current(newNodeId, nodeContent);
+            console.log('🤔 handleAskLLM调用完成');
+          } else {
+            console.error('❌ handleAskLLMRef.current 不存在！');
+          }
+        }, 100); // 100ms延迟确保状态更新
+        
         setIsThinkingMode(false); // 重置思考模式
       }
       
@@ -747,10 +938,12 @@ function Flow() {
     }
     
     // 根据autoSave参数决定是否自动保存
-    if (autoSave && !isThinkingMode) { // 思考模式在handleAskLLM中保存
+    if (autoSave) { // 移除!isThinkingMode条件，所有模式都保存
       try {
         console.log('📤 创建节点后自动保存');
-        await saveData({ showNotification: false });
+        // 确保使用最新的节点状态进行保存
+        const currentNodes = [...nodes, newNode];
+        await saveData({ nodes: currentNodes, showNotification: false });
         console.log('✅ 节点创建后保存成功');
       } catch (error) {
         console.error('❌ 节点创建后保存失败:', error);
@@ -763,11 +956,28 @@ function Flow() {
     }
     
     return newNodeId; // 返回新节点ID
-  }, [inputValue, inputPosition, getNextNodeId, screenToFlowPosition, saveData, isThinkingMode, isAnnotationMode, handleAskLLM]);
+  }, [inputValue, inputPosition, getNextNodeId, screenToFlowPosition, saveData, isThinkingMode, isAnnotationMode, nodes]);
 
   // 设置回调函数引用
   handleAskLLMRef.current = handleAskLLM;
   handleChainedQueryRef.current = handleChainedQuery;
+  handleNodeEditRef.current = handleNodeEdit;
+
+  // 使用useEffect确保ref在正确的时机被设置
+  useEffect(() => {
+    handleAskLLMRef.current = handleAskLLM;
+    console.log('✅ handleAskLLMRef 已设置');
+  }, [handleAskLLM]);
+
+  useEffect(() => {
+    handleChainedQueryRef.current = handleChainedQuery;
+    console.log('✅ handleChainedQueryRef 已设置');
+  }, [handleChainedQuery]);
+
+  useEffect(() => {
+    handleNodeEditRef.current = handleNodeEdit;
+    console.log('✅ handleNodeEditRef 已设置');
+  }, [handleNodeEdit]);
 
   // 数据加载函数
   const loadData = useCallback(async () => {
@@ -793,20 +1003,35 @@ function Flow() {
       });
       
       if (data.nodes && data.nodes.length > 0) {
-        // 为加载的节点添加回调函数
-        const nodesWithCallbacks = data.nodes.map(node => ({
+        // 为加载的节点添加回调函数和序号
+        const nodesWithCallbacks = data.nodes.map((node, index) => {
+          // 检查是否为原始标注节点（textBlock类型或包含annotation标识）
+          const isAnnotation = node.type === 'textBlock' || node.data.nodeType === 'annotation';
+          
+          return {
           ...node,
+            type: isAnnotation ? 'custom' : node.type, // 将textBlock转换为custom
           data: {
             ...node.data,
-            onAskLLM: (...args) => handleAskLLMRef.current?.(...args),
-            onChainedQuery: (...args) => handleChainedQueryRef.current?.(...args)
+            nodeIndex: node.data.nodeIndex || (index + 1), // 保持原有序号或使用索引+1
+              nodeType: isAnnotation ? 'annotation' : (node.data.nodeType || 'normal'), // 设置节点类型
+              features: isAnnotation ? ['edit'] : (node.data.features || ['edit', 'ask_llm', 'chained_query']), // 设置功能
+              onAskLLM: isAnnotation ? undefined : ((...args) => handleAskLLMRef.current?.(...args)),
+              onChainedQuery: isAnnotation ? undefined : ((...args) => handleChainedQueryRef.current?.(...args)),
+                          onEdit: (...args) => handleNodeEditRef.current?.(...args),
+            onEditingStateChange: handleEditingStateChange // 添加编辑状态变化回调
           }
-        }));
+        };
+        });
         
-        // 为加载的边添加默认样式（如果缺失）
-        const edgesWithStyles = (data.edges || []).map(edge => ({
+        // 为加载的边添加默认样式和序号（如果缺失）
+        const edgesWithStyles = (data.edges || []).map((edge, index) => ({
           ...edge,
-          type: edge.type || 'smoothstep',
+          type: edge.type || 'custom', // 默认使用自定义边类型
+          data: {
+            ...edge.data,
+            edgeIndex: edge.data?.edgeIndex || (index + 1) // 保持原有序号或使用索引+1
+          },
           markerEnd: edge.markerEnd || {
             type: 'arrowclosed',
             color: colors.edge.default
@@ -822,6 +1047,12 @@ function Flow() {
         setLastSaved(new Date(data.last_updated));
         setDataLoaded(true); // 标记数据已加载
         setHasLoadedUserData(true); // 标记已加载用户数据
+        
+        // 更新序号计数器
+        const maxNodeIndex = Math.max(...nodesWithCallbacks.map(n => n.data.nodeIndex || 0), 0);
+        const maxEdgeIndex = Math.max(...edgesWithStyles.map(e => e.data?.edgeIndex || 0), 0);
+        setNextNodeIndex(maxNodeIndex + 1);
+        setNextEdgeIndex(maxEdgeIndex + 1);
         
         setSnackbarMessage(`数据加载成功！用户: ${username}`);
         setSnackbarSeverity('success');
@@ -854,14 +1085,15 @@ function Flow() {
   // 初始化节点和边数据（仅在没有加载用户数据时使用）
   useEffect(() => {
     const initializeData = () => {
-      const nodesWithCallbacks = initialNodes.map(node => ({
-        ...node,
-        data: {
-          ...node.data,
-          onAskLLM: (...args) => handleAskLLMRef.current?.(...args),
-          onChainedQuery: (...args) => handleChainedQueryRef.current?.(...args)
-        }
-      }));
+              const nodesWithCallbacks = initialNodes.map(node => ({
+          ...node,
+          data: {
+            ...node.data,
+            onAskLLM: (...args) => handleAskLLMRef.current?.(...args),
+            onChainedQuery: (...args) => handleChainedQueryRef.current?.(...args),
+            onEdit: (...args) => handleNodeEditRef.current?.(...args)
+          }
+        }));
       setNodes(nodesWithCallbacks);
       setEdges(initialEdges); // 同时初始化边
       console.log('🎯 初始化默认数据:', { nodes: nodesWithCallbacks, edges: initialEdges });
@@ -882,7 +1114,10 @@ function Flow() {
   const onConnect = useCallback((params) => {
     const newEdge = {
       ...params,
-      type: 'smoothstep',
+      type: 'custom', // 使用自定义边类型
+      data: {
+        edgeIndex: nextEdgeIndex // 添加边序号
+      },
       markerEnd: {
         type: 'arrowclosed',
         color: colors.edge.default
@@ -893,11 +1128,12 @@ function Flow() {
       }
     };
     setEdges((eds) => addEdge(newEdge, eds));
-  }, [setEdges]);
+    setNextEdgeIndex(prev => prev + 1); // 增加边序号
+  }, [setEdges, nextEdgeIndex]);
 
-  // 自定义双击检测逻辑
-  const handlePaneClick = useCallback((event) => {
-    console.log('点击事件触发', event.target.className); // 调试日志
+  // 处理右键点击空白区域显示菜单
+  const handlePaneContextMenu = useCallback((event) => {
+    console.log('右键点击事件触发', event.target.className); // 调试日志
     
     // 检查是否点击的是空白区域（pane）
     if (!event.target.classList.contains('react-flow__pane')) {
@@ -905,72 +1141,347 @@ function Flow() {
       return;
     }
     
-    // 如果输入框当前可见，单击空白区域应该关闭输入框
+    // 阻止默认的右键菜单
+    event.preventDefault();
+    
+    // 如果输入框当前可见，右键点击空白区域应该关闭输入框
     if (isInputVisible) {
-      console.log('输入框可见，点击空白区域关闭输入框');
+      console.log('输入框可见，右键点击空白区域关闭输入框');
       setIsInputVisible(false);
       setInputValue('');
       return;
     }
     
-    // 如果菜单当前可见，单击空白区域应该关闭菜单
+    // 如果菜单当前可见，右键点击空白区域应该关闭菜单
     if (isMenuVisible) {
-      console.log('菜单可见，点击空白区域关闭菜单');
+      console.log('菜单可见，右键点击空白区域关闭菜单');
       setIsMenuVisible(false);
       return;
     }
     
-    const currentTime = Date.now();
-    const timeDiff = currentTime - lastClickTimeRef.current;
+    // 显示菜单
+    console.log('右键点击位置:', { x: event.clientX, y: event.clientY }); // 调试日志
     
-    console.log('点击时间差:', timeDiff); // 调试日志
+    // 设置菜单位置为鼠标点击位置
+    setMenuPosition({ x: event.clientX, y: event.clientY });
+    setIsMenuVisible(true);
+  }, [isInputVisible, isMenuVisible]);
+
+  // 处理左键点击空白区域
+  const handlePaneClick = useCallback((event) => {
+    console.log('左键点击事件触发', event.target.className); // 调试日志
     
-    if (timeDiff < 300) { // 300ms内的连续点击认为是双击
-      // 双击事件
-      console.log('检测到双击!');
-      
-      // 清除之前的定时器
-      if (clickTimeoutRef.current) {
-        clearTimeout(clickTimeoutRef.current);
-        clickTimeoutRef.current = null;
-      }
-      
-      // 显示菜单而不是直接显示输入框
-      console.log('双击位置:', { x: event.clientX, y: event.clientY }); // 调试日志
-      
-      // 设置菜单位置为鼠标点击位置
-      setMenuPosition({ x: event.clientX, y: event.clientY });
-      setIsMenuVisible(true);
-      
-      // 重置计数
-      clickCountRef.current = 0;
-    } else {
-      // 单击事件
-      console.log('单击事件');
-      clickCountRef.current = 1;
-      
-      // 清除之前的定时器
-      if (clickTimeoutRef.current) {
-        clearTimeout(clickTimeoutRef.current);
-      }
-      
-      // 设置定时器，如果300ms内没有第二次点击，则认为是单击
-      clickTimeoutRef.current = setTimeout(() => {
-        console.log('确认单击');
-        clickCountRef.current = 0;
-        clickTimeoutRef.current = null;
-      }, 300);
+    // 检查是否点击的是空白区域（pane）
+    if (!event.target.classList.contains('react-flow__pane')) {
+      console.log('不是空白区域，忽略');
+      return;
     }
     
-    lastClickTimeRef.current = currentTime;
-  }, [screenToFlowPosition, isInputVisible, isMenuVisible]);
+    // 如果输入框当前可见，左键点击空白区域应该关闭输入框
+    if (isInputVisible) {
+      console.log('输入框可见，左键点击空白区域关闭输入框');
+      setIsInputVisible(false);
+      setInputValue('');
+      return;
+    }
+    
+    // 如果菜单当前可见，左键点击空白区域应该关闭菜单
+    if (isMenuVisible) {
+      console.log('菜单可见，左键点击空白区域关闭菜单');
+      setIsMenuVisible(false);
+      return;
+    }
+    
+    // 左键点击空白处的处理逻辑
+    if (interactionMode === InteractionMode.BOX_SELECTING) {
+      // 框选模式：退出框选，可无缝进入新框选
+      console.log('🚪 框选模式下左键点击空白，退出框选模式');
+      exitSelectionMode();
+    } else if (interactionMode === InteractionMode.SELECTING) {
+      // 选择模式：取消选择，可无缝进入框选
+      console.log('🚪 选择模式下左键点击空白，取消选择');
+      // 只清除选中状态，不重新设置整个 nodes 数组
+      setSelectedNodes([]);
+      setInteractionMode(InteractionMode.NORMAL);
+    }
+  }, [isInputVisible, isMenuVisible, interactionMode]);
+
+
+
+  // 处理节点拖拽开始
+  const handleNodeDragStart = useCallback((event, node) => {
+    console.log('🚀 节点拖拽开始:', node.id);
+    setIsDraggingNode(true);
+    setInteractionMode(InteractionMode.DRAGGING);
+    
+    // 检查当前是否在框选模式中
+    const currentSelectionGroupIds = selectionGroupIds;
+    const isInBoxSelectingMode = currentSelectionGroupIds.size > 0;
+    
+    console.log('🔍 拖拽开始检查:', {
+      nodeId: node.id,
+      isInBoxSelectingMode,
+      selectionGroupIds: Array.from(currentSelectionGroupIds),
+      isInGroup: currentSelectionGroupIds.has(node.id)
+    });
+    
+    // 如果在框选模式中，确保拖拽的节点在选中组中
+    if (isInBoxSelectingMode && !currentSelectionGroupIds.has(node.id)) {
+      console.log('❌ 拖拽的节点不在选中组中');
+      return;
+    }
+    
+    // 如果不在框选模式中，且拖拽的节点不在选中组中，清除其他选择
+    if (!isInBoxSelectingMode && !selectedNodes.some(selectedNode => selectedNode.id === node.id)) {
+      // 只更新选中状态，不重新设置整个 nodes 数组
+      setSelectedNodes([node]);
+    }
+  }, [selectedNodes, nodes, selectionGroupIds]);
+
+  // 处理节点拖拽
+  const handleNodeDrag = useCallback((event, node, nodes) => {
+    // 检查当前是否在框选模式中
+    const currentSelectionGroupIds = selectionGroupIds;
+    const isInBoxSelectingMode = currentSelectionGroupIds.size > 0;
+    
+    console.log('🔍 拖拽中检查:', {
+      nodeId: node.id,
+      isInBoxSelectingMode,
+      selectionGroupIds: Array.from(currentSelectionGroupIds),
+      isInGroup: currentSelectionGroupIds.has(node.id)
+    });
+    
+    // 如果在框选模式中，进行组拖拽
+    if (isInBoxSelectingMode && currentSelectionGroupIds.has(node.id)) {
+      console.log('🔄 组拖拽中，移动所有选中节点');
+      
+      // 获取拖拽前的节点位置（从ref中获取）
+      const previousNodes = nodesRef.current;
+      const previousNode = previousNodes.find(n => n.id === node.id);
+      
+      if (!previousNode) {
+        console.log('❌ 找不到拖拽前的节点位置');
+        return;
+      }
+      
+      // 计算拖拽的偏移量（当前拖拽位置 - 拖拽前位置）
+      const deltaX = node.position.x - previousNode.position.x;
+      const deltaY = node.position.y - previousNode.position.y;
+      
+      console.log('🔄 拖拽偏移量:', { deltaX, deltaY });
+      console.log('🔄 拖拽前位置:', previousNode.position);
+      console.log('🔄 拖拽后位置:', node.position);
+      
+      // 如果偏移量太小，忽略
+      if (Math.abs(deltaX) < 0.1 && Math.abs(deltaY) < 0.1) {
+        return;
+      }
+      
+      // 移动所有选中的节点
+      const updatedNodes = previousNodes.map(n => {
+        if (currentSelectionGroupIds.has(n.id)) {
+          const newPosition = {
+            x: n.position.x + deltaX,
+            y: n.position.y + deltaY
+          };
+          console.log(`🔄 移动节点 ${n.id}:`, { from: n.position, to: newPosition });
+          return {
+            ...n,
+            position: newPosition
+          };
+        }
+        return n;
+      });
+      
+      console.log('🔄 更新后节点数:', updatedNodes.length);
+      
+      // 更新节点状态
+      setNodes(updatedNodes);
+      
+      return;
+    }
+    
+    // 如果不在框选模式中，且只有一个节点被选中，使用ReactFlow的默认拖拽
+    if (!isInBoxSelectingMode && selectedNodes.length <= 1) {
+      return;
+    }
+    
+    // 普通的多选拖拽：移动所有选中的节点
+    const previousNodes = nodesRef.current;
+    const previousNode = previousNodes.find(n => n.id === node.id);
+    
+    if (!previousNode) return;
+    
+    // 计算拖拽的偏移量
+    const deltaX = node.position.x - previousNode.position.x;
+    const deltaY = node.position.y - previousNode.position.y;
+    
+    // 移动所有选中的节点
+    const updatedNodes = previousNodes.map(n => {
+      if (selectedNodes.some(selectedNode => selectedNode.id === n.id)) {
+        return {
+          ...n,
+          position: {
+            x: n.position.x + deltaX,
+            y: n.position.y + deltaY
+          }
+        };
+      }
+      return n;
+    });
+    
+    setNodes(updatedNodes);
+  }, [selectedNodes, selectionGroupIds]);
+
+  // 处理节点拖拽结束
+  const handleNodeDragStop = useCallback(async (event, node) => {
+    console.log('🛑 节点拖拽结束:', node.id);
+    setIsDraggingNode(false);
+    
+    // 检查当前是否在框选模式中
+    const currentSelectionGroupIds = selectionGroupIds;
+    const isInBoxSelectingMode = currentSelectionGroupIds.size > 0;
+    
+    console.log('🔍 拖拽结束检查:', {
+      nodeId: node.id,
+      isInBoxSelectingMode,
+      selectionGroupIds: Array.from(currentSelectionGroupIds),
+      isInGroup: currentSelectionGroupIds.has(node.id)
+    });
+    
+    // 如果是从框选模式拖拽，保持框选模式，不保存
+    if (isInBoxSelectingMode && currentSelectionGroupIds.has(node.id)) {
+      setInteractionMode(InteractionMode.BOX_SELECTING);
+      console.log('🔄 保持框选模式，不保存');
+      return;
+    }
+    
+    // 只有在非框选模式下才保存
+    if (!isInBoxSelectingMode) {
+      // 自动保存拖拽后的布局
+      try {
+        console.log('💾 保存单独节点拖拽后的布局数据');
+        await saveData({ showNotification: false });
+        console.log('✅ 单独节点拖拽后布局保存成功');
+        
+        setSnackbarMessage('节点位置已保存！');
+        setSnackbarSeverity('success');
+        setSnackbarOpen(true);
+        
+      } catch (error) {
+        console.error('❌ 单独节点拖拽后布局保存失败:', error);
+        setSnackbarMessage('位置保存失败: ' + error.message);
+        setSnackbarSeverity('error');
+        setSnackbarOpen(true);
+      }
+    }
+    
+    // 不改变交互模式，保持当前状态
+    console.log('✅ 单独节点拖拽完成，保持当前交互模式');
+  }, [selectionGroupIds, username, saveData]);
+
+  // 批量移动选中的节点
+  const moveSelectedNodes = useCallback((deltaX, deltaY) => {
+    if (selectedNodes.length === 0) return;
+    
+    setNodes(nds => nds.map(node => {
+      if (selectedNodes.some(selectedNode => selectedNode.id === node.id)) {
+        return {
+          ...node,
+          position: {
+            x: node.position.x + deltaX,
+            y: node.position.y + deltaY
+          }
+        };
+      }
+      return node;
+    }));
+  }, [selectedNodes]);
+
+  // 批量询问LLM回调（预留）
+  const handleBatchAskLLM = useCallback((nodeIds) => {
+    console.log('批量询问LLM:', nodeIds);
+    // TODO: 实现批量询问LLM的逻辑
+  }, []);
+
+  // 批量编组回调（预留）
+  const handleBatchGroup = useCallback((nodeIds) => {
+    console.log('批量编组:', nodeIds);
+    // TODO: 实现批量编组的逻辑
+  }, []);
+
+  // 退出框选模式
+  const exitSelectionMode = useCallback(async () => {
+    console.log('🚪 退出框选模式');
+    
+    // 获取最新的节点状态（从ref中获取）
+    const currentNodes = nodesRef.current;
+    const currentEdges = edgesRef.current;
+    
+    // 清除所有节点的选中状态后再保存
+    const nodesToSave = currentNodes.map(node => ({
+      ...node,
+      selected: false
+    }));
+    
+    console.log('💾 准备保存的节点数据（已清除选中状态）:', nodesToSave.map(n => ({ id: n.id, position: n.position })));
+    
+    // 保存当前布局到后端
+    try {
+      console.log('💾 保存框选后的布局数据');
+      await saveData({ showNotification: false });
+      console.log('✅ 框选后布局保存成功');
+      
+      setSnackbarMessage('布局已保存！');
+      setSnackbarSeverity('success');
+      setSnackbarOpen(true);
+      
+    } catch (error) {
+      console.error('❌ 框选后布局保存失败:', error);
+      setSnackbarMessage('布局保存失败: ' + error.message);
+      setSnackbarSeverity('error');
+      setSnackbarOpen(true);
+    }
+    
+    // 更新状态
+    setInteractionMode(InteractionMode.NORMAL);
+    setSelectionGroupIds(new Set());
+    setBoxSelectedNodes(new Set());
+    
+    // 清除所有节点的选中状态
+    setNodes(nds => nds.map(node => ({
+      ...node,
+      selected: false
+    })));
+    setSelectedNodes([]);
+  }, [username, saveData]);
 
   // 处理选择变化（节点和边）
   const handleSelectionChange = useCallback((params) => {
     console.log('选择变化:', params); // 调试日志
+    
+    // 只有在真正的框选模式中才阻止选择变化
+    if (interactionMode === InteractionMode.BOX_SELECTING && selectionGroupIds.size > 0) {
+      console.log('🔒 框选模式中，保持当前选中状态');
+      return;
+    }
+    
     setSelectedNodes(params.nodes);
     setSelectedEdges(params.edges);
-  }, []);
+  }, [interactionMode, selectionGroupIds]);
+
+  // 调试函数：检查节点选中状态
+  const debugNodeSelection = useCallback(() => {
+    console.log('🔍 调试节点选中状态:');
+    console.log('📦 当前节点数组:', nodes.map(n => ({ id: n.id, selected: n.selected })));
+    console.log('📦 选中节点数组:', selectedNodes.map(n => n.id));
+    console.log('📦 框选组:', Array.from(selectionGroupIds));
+    console.log('📦 交互模式:', interactionMode);
+    
+    // 检查React Flow是否正确渲染选中状态
+    const selectedNodesInDOM = document.querySelectorAll('.react-flow__node.selected');
+    console.log('🔍 DOM中选中的节点:', Array.from(selectedNodesInDOM).map(el => el.getAttribute('data-id')));
+  }, [nodes, selectedNodes, selectionGroupIds, interactionMode]);
 
   // 取消创建
   const cancelCreate = useCallback(() => {
@@ -991,6 +1502,7 @@ function Flow() {
 
   const handleAddThinkingNote = useCallback(() => {
     console.log('🤔 选择添加思考笔记');
+    console.log('🤔 当前handleAskLLMRef状态:', !!handleAskLLMRef.current);
     setIsThinkingMode(true);
     setInputPosition({ x: menuPosition.x, y: menuPosition.y });
     setIsInputVisible(true);
@@ -1042,24 +1554,25 @@ function Flow() {
         return;
       }
       
+      // 预先计算删除后的数据
       const selectedNodeIds = selectedNodes.map(node => node.id);
       console.log('🗑️ 准备删除节点:', selectedNodeIds);
       
-      // 预先计算删除后的数据
-      const currentNodes = nodes;
-      const currentEdges = edges;
+      // 使用 setNodes 的 callback 方式确保数据一致性
+      setNodes(nds => {
+        const filteredNodes = nds.filter((node) => !selectedNodeIds.includes(node.id));
+        console.log('🗑️ 删除后预计剩余节点数:', filteredNodes.length);
+        return filteredNodes;
+      });
       
-      const filteredNodes = currentNodes.filter((node) => !selectedNodeIds.includes(node.id));
-      const filteredEdges = currentEdges.filter((edge) => 
-        !selectedNodeIds.includes(edge.source) && !selectedNodeIds.includes(edge.target)
-      );
+      setEdges(eds => {
+        const filteredEdges = eds.filter((edge) => 
+          !selectedNodeIds.includes(edge.source) && !selectedNodeIds.includes(edge.target)
+        );
+        console.log('🗑️ 删除后预计剩余边数:', filteredEdges.length);
+        return filteredEdges;
+      });
       
-      console.log('🗑️ 删除后预计剩余节点数:', filteredNodes.length);
-      console.log('🗑️ 删除后预计剩余边数:', filteredEdges.length);
-      
-      // 更新状态
-      setNodes(filteredNodes);
-      setEdges(filteredEdges);
       setSelectedNodes([]);
       
       console.log('✅ 节点删除完成，准备保存');
@@ -1067,32 +1580,9 @@ function Flow() {
       // 保存更新后的数据
       const saveDeletedData = async () => {
         try {
-          console.log('📡 准备保存删除后的数据:', {
-            username: username,
-            nodesCount: filteredNodes.length,
-            edgesCount: filteredEdges.length
-          });
-          
-          const response = await fetch(`${API_BASE_URL}/save-data`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              username: username,
-              nodes: filteredNodes,
-              edges: filteredEdges
-            })
-          });
-
-          if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
-          }
-
-          const data = await response.json();
-          setLastSaved(new Date());
-          console.log('✅ 删除节点后保存成功:', data);
+          console.log('📤 删除节点后自动保存');
+          await saveData({ showNotification: false });
+          console.log('✅ 删除节点后保存成功');
           
           setSnackbarMessage('节点删除并保存成功！');
           setSnackbarSeverity('success');
@@ -1107,12 +1597,12 @@ function Flow() {
       };
       
       // 延迟保存确保状态更新完成
-      setTimeout(saveDeletedData, 100);
+      await saveDeletedData();
       
     } else {
       console.log('🗑️ 没有选中的节点，跳过删除');
     }
-  }, [selectedNodes, username, nodes, edges]);
+  }, [selectedNodes, username, nodes, edges, saveData]);
 
   // 删除选中的边
   const deleteSelectedEdges = useCallback(async () => {
@@ -1136,10 +1626,12 @@ function Flow() {
         console.log('✅ 删除边后保存成功');
       } catch (error) {
         console.error('❌ 删除边后保存失败:', error);
-        setSnackbarMessage('连线已删除，但保存失败: ' + error.message);
+        setSnackbarMessage('删除成功但保存失败: ' + error.message);
         setSnackbarSeverity('error');
         setSnackbarOpen(true);
       }
+    } else {
+      console.log('🗑️ 没有选中的边，跳过删除');
     }
   }, [selectedEdges, saveData]);
 
@@ -1161,6 +1653,32 @@ function Flow() {
         await saveData();
       }
       
+      // 箭头键移动选中的节点
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key) && selectedNodes.length > 0 && !isAnyNodeEditing) {
+        event.preventDefault();
+        const step = event.shiftKey ? 10 : 1; // Shift+箭头键移动10像素，普通箭头键移动1像素
+        
+        let deltaX = 0;
+        let deltaY = 0;
+        
+        switch (event.key) {
+          case 'ArrowUp':
+            deltaY = -step;
+            break;
+          case 'ArrowDown':
+            deltaY = step;
+            break;
+          case 'ArrowLeft':
+            deltaX = -step;
+            break;
+          case 'ArrowRight':
+            deltaX = step;
+            break;
+        }
+        
+        moveSelectedNodes(deltaX, deltaY);
+      }
+      
       // Esc键清除链式高亮
       if (event.key === 'Escape' && isChainHighlighted) {
         console.log('🧹 按Esc键清除链式高亮');
@@ -1179,7 +1697,7 @@ function Flow() {
     return () => {
       document.removeEventListener('keydown', handleGlobalKeyDown);
     };
-  }, [deleteSelectedNodes, deleteSelectedEdges, saveData, isChainHighlighted, colors]);
+  }, [deleteSelectedNodes, deleteSelectedEdges, saveData, isChainHighlighted, colors, isAnyNodeEditing]);
 
   // 清理定时器
   useEffect(() => {
@@ -1189,6 +1707,267 @@ function Flow() {
       }
     };
   }, []);
+
+  // 全局鼠标事件监听器，用于框选
+  useEffect(() => {
+    const handleGlobalMouseDown = (event) => {
+      // 检查是否点击的是ReactFlow的pane
+      const reactFlowPane = event.target.closest('.react-flow__pane');
+      if (!reactFlowPane) {
+        return;
+      }
+      
+      // 如果输入框或菜单可见，不处理鼠标事件
+      if (isInputVisible || isMenuVisible) {
+        return;
+      }
+      
+      // 如果点击的是节点
+      const clickedNode = event.target.closest('.react-flow__node');
+      if (clickedNode) {
+        const nodeId = clickedNode.getAttribute('data-id');
+        
+        // 根据当前交互模式处理节点点击
+        if (interactionMode === InteractionMode.BOX_SELECTING) {
+          // 框选模式：点击组外节点退出框选并选中该节点
+          if (!selectionGroupIds.has(nodeId)) {
+            console.log('🚪 点击组外节点，退出框选模式并选中该节点');
+            exitSelectionMode();
+            // 选中点击的节点
+            setNodes(nds => nds.map(node => ({
+              ...node,
+              selected: node.id === nodeId
+            })));
+            setSelectedNodes(nodes.filter(node => node.id === nodeId));
+            setInteractionMode(InteractionMode.SELECTING);
+          }
+        } else if (interactionMode === InteractionMode.SELECTING) {
+          // 选择模式：点击其他节点切换选择
+          setNodes(nds => nds.map(node => ({
+            ...node,
+            selected: node.id === nodeId
+          })));
+          setSelectedNodes(nodes.filter(node => node.id === nodeId));
+        } else {
+          // 正常模式：选中节点
+          setNodes(nds => nds.map(node => ({
+            ...node,
+            selected: node.id === nodeId
+          })));
+          setSelectedNodes(nodes.filter(node => node.id === nodeId));
+          setInteractionMode(InteractionMode.SELECTING);
+        }
+        return;
+      }
+      
+      // 点击空白处
+      if (interactionMode === InteractionMode.BOX_SELECTING) {
+        // 框选模式：退出框选，可无缝进入新框选
+        console.log('🚪 框选模式下点击空白，退出框选模式');
+        exitSelectionMode();
+      } else if (interactionMode === InteractionMode.SELECTING) {
+        // 选择模式：取消选择，可无缝进入框选
+        console.log('🚪 选择模式下点击空白，取消选择');
+        setNodes(nds => nds.map(node => ({
+          ...node,
+          selected: false
+        })));
+        setSelectedNodes([]);
+        setInteractionMode(InteractionMode.NORMAL);
+      }
+      
+      // 开始框选（无论之前是什么状态）
+      console.log('✅ 开始框选');
+      setIsSelecting(true);
+      setSelectionStart({ x: event.clientX, y: event.clientY });
+      setSelectionEnd({ x: event.clientX, y: event.clientY });
+    };
+
+    const handleGlobalMouseMove = (event) => {
+      if (!isSelecting) {
+        return;
+      }
+      
+      console.log('🖱️ 全局鼠标移动，更新框选');
+      setSelectionEnd({ x: event.clientX, y: event.clientY });
+    };
+
+    const handleGlobalMouseUp = (event) => {
+      if (!isSelecting) {
+        return;
+      }
+      
+      console.log('🛑 全局鼠标释放，结束框选');
+      setIsSelecting(false);
+      
+      // 计算框选区域
+      const startX = Math.min(selectionStart.x, selectionEnd.x);
+      const endX = Math.max(selectionStart.x, selectionEnd.x);
+      const startY = Math.min(selectionStart.y, selectionEnd.y);
+      const endY = Math.max(selectionStart.y, selectionEnd.y);
+      
+      // 如果框选区域太小，认为是点击而不是框选
+      if (Math.abs(endX - startX) < 5 && Math.abs(endY - startY) < 5) {
+        setSelectionStart(null);
+        setSelectionEnd(null);
+        return;
+      }
+      
+      // 获取ReactFlow容器
+      const reactFlowContainer = document.querySelector('.react-flow');
+      if (!reactFlowContainer) {
+        setSelectionStart(null);
+        setSelectionEnd(null);
+        return;
+      }
+      
+      // 使用ReactFlow的API获取viewport信息
+      const viewport = getViewport();
+      console.log('🔍 ReactFlow Viewport:', viewport);
+      
+      // 使用ReactFlow的API转换坐标
+      const flowStart = screenToFlowPosition({ x: startX, y: startY });
+      const flowEnd = screenToFlowPosition({ x: endX, y: endY });
+      
+      const flowStartX = flowStart.x;
+      const flowStartY = flowStart.y;
+      const flowEndX = flowEnd.x;
+      const flowEndY = flowEnd.y;
+      
+      console.log('🔍 坐标转换结果:', {
+        screenStart: { x: startX, y: startY },
+        screenEnd: { x: endX, y: endY },
+        flowStart: { x: flowStartX, y: flowStartY },
+        flowEnd: { x: flowEndX, y: flowEndY }
+      });
+      
+      // 确保框选区域是有效的
+      const flowWidth = Math.abs(flowEndX - flowStartX);
+      const flowHeight = Math.abs(flowEndY - flowStartY);
+      
+      console.log('🔍 框选区域尺寸:', { flowWidth, flowHeight });
+      
+      console.log('🔍 框选区域:', {
+        screen: { startX, endX, startY, endY },
+        flow: { flowStartX, flowEndX, flowStartY, flowEndY }
+      });
+      
+      // 添加更详细的调试信息
+      console.log('🔍 框选区域详情:', {
+        screenStart: { x: startX, y: startY },
+        screenEnd: { x: endX, y: endY },
+        flowStart: { x: flowStartX, y: flowStartY },
+        flowEnd: { x: flowEndX, y: flowEndY },
+        screenWidth: endX - startX,
+        screenHeight: endY - startY,
+        flowWidth: flowEndX - flowStartX,
+        flowHeight: flowEndY - flowStartY
+      });
+      
+      // 选择框选区域内的节点
+      const currentNodes = nodesRef.current;
+      console.log('🔍 当前所有节点:', currentNodes.map(n => ({ id: n.id, position: n.position })));
+      
+      const selectedNodeIds = currentNodes.filter(node => {
+        const nodeX = node.position.x;
+        const nodeY = node.position.y;
+        const nodeWidth = 120; // 假设节点宽度
+        const nodeHeight = 60; // 假设节点高度
+        
+        const isInSelection = (
+          nodeX + nodeWidth >= flowStartX &&
+          nodeX <= flowEndX &&
+          nodeY + nodeHeight >= flowStartY &&
+          nodeY <= flowEndY
+        );
+        
+        console.log(`🔍 节点 ${node.id}:`, {
+          position: { x: nodeX, y: nodeY },
+          size: { width: nodeWidth, height: nodeHeight },
+          bounds: {
+            left: nodeX,
+            right: nodeX + nodeWidth,
+            top: nodeY,
+            bottom: nodeY + nodeHeight
+          },
+          selection: { flowStartX, flowEndX, flowStartY, flowEndY },
+          isInSelection,
+          // 添加详细的碰撞检测信息
+          collision: {
+            horizontal: nodeX + nodeWidth >= flowStartX && nodeX <= flowEndX,
+            vertical: nodeY + nodeHeight >= flowStartY && nodeY <= flowEndY,
+            leftCheck: nodeX + nodeWidth >= flowStartX,
+            rightCheck: nodeX <= flowEndX,
+            topCheck: nodeY + nodeHeight >= flowStartY,
+            bottomCheck: nodeY <= flowEndY
+          }
+        });
+        
+        return isInSelection;
+      }).map(node => node.id);
+      
+      console.log('📦 框选结果:', selectedNodeIds);
+      console.log('📦 节点总数:', nodes.length);
+      
+      // 更新选中状态
+      const updatedNodes = currentNodes.map(node => ({
+        ...node,
+        selected: selectedNodeIds.includes(node.id)
+      }));
+      
+      console.log('📦 更新节点状态:', updatedNodes.map(n => ({ id: n.id, selected: n.selected })));
+      
+      // 强制更新节点状态
+      setNodes(nds => nds.map(node => ({
+        ...node,
+        selected: selectedNodeIds.includes(node.id)
+      })));
+      const selectedNodesArray = currentNodes.filter(node => selectedNodeIds.includes(node.id));
+      setSelectedNodes(selectedNodesArray);
+      
+      console.log('📦 设置选中节点:', selectedNodesArray.map(n => n.id));
+      
+      // 确保React Flow能正确渲染选中状态
+      setTimeout(() => {
+        console.log('🔍 延迟检查节点状态:', updatedNodes.map(n => ({ id: n.id, selected: n.selected })));
+        
+        // 强制重新渲染选中状态
+        setNodes(nds => nds.map(node => ({
+          ...node,
+          selected: selectedNodeIds.includes(node.id)
+        })));
+      }, 100);
+      
+      // 如果框选到了节点，进入框选模式
+      if (selectedNodeIds.length > 0) {
+        setInteractionMode(InteractionMode.BOX_SELECTING);
+        setSelectionGroupIds(new Set(selectedNodeIds));
+        setBoxSelectedNodes(new Set(selectedNodeIds));
+        setSnackbarMessage(`框选成功！选中了 ${selectedNodeIds.length} 个节点，进入组移动模式`);
+        setSnackbarSeverity('success');
+        setSnackbarOpen(true);
+        
+        // 调试：检查节点状态
+        setTimeout(() => {
+          debugNodeSelection();
+        }, 100);
+      }
+      
+      // 清除框选状态
+      setSelectionStart(null);
+      setSelectionEnd(null);
+    };
+
+    document.addEventListener('mousedown', handleGlobalMouseDown);
+    document.addEventListener('mousemove', handleGlobalMouseMove);
+    document.addEventListener('mouseup', handleGlobalMouseUp);
+
+    return () => {
+      document.removeEventListener('mousedown', handleGlobalMouseDown);
+      document.removeEventListener('mousemove', handleGlobalMouseMove);
+      document.removeEventListener('mouseup', handleGlobalMouseUp);
+    };
+  }, [isSelecting, selectionStart, selectionEnd, isInputVisible, isMenuVisible]);
 
   // 初始化数据加载
   useEffect(() => {
@@ -1225,23 +2004,32 @@ function Flow() {
       <ReactFlow
         nodes={nodes}
         edges={edges}
-        nodeTypes={nodeTypes}
+        nodeTypes={memoizedNodeTypes}
+        edgeTypes={edgeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
-        onPaneClick={handlePaneClick}
+
+        onNodeDragStart={handleNodeDragStart}
+        onNodeDrag={handleNodeDrag}
+        onNodeDragStop={handleNodeDragStop}
         onSelectionChange={handleSelectionChange}
+        onPaneClick={handlePaneClick}
+        onPaneContextMenu={handlePaneContextMenu}
         panOnDrag={[2]} // 只有右键（按钮2）可以平移
         panOnScroll={false}
         zoomOnDoubleClick={false}
         fitView
         defaultViewport={{ x: 0, y: 0, zoom: 1 }}
-        minZoom={0.5}
+        minZoom={0.1}
         maxZoom={2}
         selectNodesOnDrag={false} // 拖拽时不选中节点
-        elementsSelectable={true}
+        elementsSelectable={true} // 启用元素选择，允许选中连线
         nodesConnectable={true}
         nodesDraggable={true}
+        multiSelectionKeyCode={null} // 禁用多选快捷键
+        deleteKeyCode={null} // 禁用删除快捷键，我们自定义处理
+        preventScrolling={true}
         style={{ 
           cursor: 'default',
           width: '100%',
@@ -1251,6 +2039,13 @@ function Flow() {
         <Background color={canvasColors.background} gap={canvasColors.grid} />
         <Controls />
       </ReactFlow>
+
+      {/* 框选组件 */}
+      <SelectionBox
+        startPoint={selectionStart}
+        endPoint={selectionEnd}
+        isVisible={isSelecting}
+      />
 
       {/* 双击菜单 */}
       {isMenuVisible && (
@@ -1334,22 +2129,29 @@ function Flow() {
         title="操作说明"
         icon={<InfoIcon />}
         items={[
-          "• 双击空白区域弹出创建菜单",
+          "• 右键点击空白区域弹出创建菜单",
           "• 选择'添加笔记'创建普通节点",
           "• 选择'添加思考笔记'创建节点并自动生成LLM分析",
-          "• 选择'添加原始标注'创建半透明文本块（无连接点）",
+          "• 选择'添加原始标注'创建半透明节点（仅支持编辑功能）",
           "• 输入内容后按Ctrl+Enter或点击按钮创建节点",
           "• 单独按Enter键可换行，按Esc键或点击空白区域取消输入",
+          "• 右键点击节点选择'编辑'修改节点内容",
+          "• 编辑时按Ctrl+Enter确认，按Esc或点击空白处取消",
           "• 右键点击节点询问LLM，立即生成'Thinking'节点",
           "• 右键点击节点选择'链式查询'，追踪整个思维链路",
           "• 按Esc键清除链式高亮",
           "• 拖拽节点右侧圆点连接到其他节点",
           "• 左键拖拽移动节点，右键拖拽平移画布",
+          "• 点击空白处拖拽进行框选，点击节点拖拽移动节点",
+          "• 框选后进入组移动模式，拖拽组内任意节点移动整个组",
+          "• 组移动模式下点击空白处或非组节点退出模式",
+          "• 选中节点后可用箭头键移动，Shift+箭头键快速移动",
           "• 选中节点后按Delete键删除（锁定节点不可删除）",
           "• 点击连线按Delete键删除连线",
           { text: "• Ctrl+S 手动保存数据", color: colors.primary.main },
-          { text: "• 创建/删除节点时自动保存", color: colors.success.main },
-          { text: "• 橙色边框表示节点已锁定，正在处理中", color: colors.warning.main }
+          { text: "• 创建/删除/编辑节点时自动保存", color: colors.success.main },
+          { text: "• 橙色边框表示节点已锁定，正在处理中", color: colors.warning.main },
+          { text: "• 玫红色背景表示节点正在编辑中", color: colors.node.editing }
         ]}
       />
 
@@ -1392,9 +2194,9 @@ export default function App() {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      <ReactFlowProvider>
-        <Flow />
-      </ReactFlowProvider>
+    <ReactFlowProvider>
+      <Flow />
+    </ReactFlowProvider>
     </ThemeProvider>
   );
 }

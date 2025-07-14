@@ -2,15 +2,15 @@
 export const fonts = {
   // 基础字体大小
   sizes: {
-    xs: '10px',
-    sm: '12px',
-    base: '14px',
-    lg: '16px',
-    xl: '18px',
-    '2xl': '20px',
-    '3xl': '24px',
+    xs: '12px',
+    sm: '14px',
+    base: '16px',
+    lg: '18px',
+    xl: '20px',
+    '2xl': '24px',
+    '3xl': '28px',
     '4xl': '32px',
-    '5xl': '48px',
+    '5xl': '40px',
   },
   
   // 字体权重

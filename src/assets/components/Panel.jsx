@@ -1,5 +1,6 @@
-import React from 'react';
-import { Paper, Box, Typography } from '@mui/material';
+import React, { useState } from 'react';
+import { Paper, Box, Typography, IconButton, Collapse } from '@mui/material';
+import { ExpandMore as ExpandMoreIcon, ExpandLess as ExpandLessIcon } from '@mui/icons-material';
 import { colors, shadows } from '../../theme/colors';
 import { fonts } from '../../theme/fonts';
 
@@ -51,6 +52,12 @@ export const InfoPanel = ({
   sx = {},
   ...props 
 }) => {
+  const [isCollapsed, setIsCollapsed] = useState(false);
+
+  const handleToggleCollapse = () => {
+    setIsCollapsed(!isCollapsed);
+  };
+
   return (
     <BasePanel 
       position={position}
@@ -59,42 +66,59 @@ export const InfoPanel = ({
       sx={sx}
       {...props}
     >
-      <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-        {icon && React.cloneElement(icon, { 
-          sx: { 
-            mr: 1, 
-            fontSize: '1.2rem',
-            color: colors.primary.main,
-            ...icon.props.sx 
-          }
-        })}
-        <Typography variant="h6" sx={{ 
-          fontSize: fonts.components.panel.title.fontSize, 
-          fontWeight: fonts.components.panel.title.fontWeight,
-          fontFamily: fonts.components.panel.title.fontFamily,
-          color: colors.text.primary
-        }}>
-          {title}
-        </Typography>
-      </Box>
-      <Box sx={{ fontSize: fonts.components.panel.content.fontSize, color: colors.text.secondary }}>
-        {items.map((item, index) => (
-          <Typography 
-            key={index} 
-            variant="body2" 
-            sx={{ 
-              mb: 0.5,
-              color: item.color || colors.text.secondary,
-              fontWeight: item.bold ? 600 : 400,
-              fontSize: fonts.components.panel.content.fontSize,
-              fontFamily: fonts.components.panel.content.fontFamily,
-            }}
-          >
-            {item.prefix && <span style={{ marginRight: '4px' }}>{item.prefix}</span>}
-            {item.text || item}
+      <Box sx={{ display: 'flex', alignItems: 'center', mb: 1, justifyContent: 'space-between' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+          {icon && React.cloneElement(icon, { 
+            sx: { 
+              mr: 1, 
+              fontSize: '1.2rem',
+              color: colors.primary.main,
+              ...icon.props.sx 
+            }
+          })}
+          <Typography variant="h6" sx={{ 
+            fontSize: fonts.components.panel.title.fontSize, 
+            fontWeight: fonts.components.panel.title.fontWeight,
+            fontFamily: fonts.components.panel.title.fontFamily,
+            color: colors.text.primary
+          }}>
+            {title}
           </Typography>
-        ))}
+        </Box>
+        <IconButton
+          size="small"
+          onClick={handleToggleCollapse}
+          sx={{
+            color: colors.text.secondary,
+            '&:hover': {
+              color: colors.primary.main,
+            },
+            padding: '4px',
+          }}
+        >
+          {isCollapsed ? <ExpandMoreIcon fontSize="small" /> : <ExpandLessIcon fontSize="small" />}
+        </IconButton>
       </Box>
+      <Collapse in={!isCollapsed}>
+        <Box sx={{ fontSize: fonts.components.panel.content.fontSize, color: colors.text.secondary }}>
+          {items.map((item, index) => (
+            <Typography 
+              key={index} 
+              variant="body2" 
+              sx={{ 
+                mb: 0.5,
+                color: item.color || colors.text.secondary,
+                fontWeight: item.bold ? 600 : 400,
+                fontSize: fonts.components.panel.content.fontSize,
+                fontFamily: fonts.components.panel.content.fontFamily,
+              }}
+            >
+              {item.prefix && <span style={{ marginRight: '4px' }}>{item.prefix}</span>}
+              {item.text || item}
+            </Typography>
+          ))}
+        </Box>
+      </Collapse>
     </BasePanel>
   );
 };
@@ -110,6 +134,12 @@ export const StatusPanel = ({
   sx = {},
   ...props 
 }) => {
+  const [isCollapsed, setIsCollapsed] = useState(false);
+
+  const handleToggleCollapse = () => {
+    setIsCollapsed(!isCollapsed);
+  };
+
   return (
     <BasePanel 
       position={position}
@@ -121,41 +151,58 @@ export const StatusPanel = ({
       }}
       {...props}
     >
-      <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-        {icon && React.cloneElement(icon, { 
-          sx: { 
-            mr: 1, 
-            fontSize: '1.2rem',
-            color: colors.primary.main,
-            ...icon.props.sx 
-          }
-        })}
-        <Typography variant="h6" sx={{ 
-          fontSize: fonts.components.panel.title.fontSize, 
-          fontWeight: fonts.components.panel.title.fontWeight,
-          fontFamily: fonts.components.panel.title.fontFamily,
-          color: colors.text.primary
-        }}>
-          {title}
-        </Typography>
-      </Box>
-      <Box sx={{ fontSize: fonts.components.panel.content.fontSize, color: colors.text.secondary }}>
-        {Object.entries(status).map(([key, value], index) => (
-          <Typography 
-            key={index} 
-            variant="body2" 
-            sx={{ 
-              mb: 0.5,
-              color: value?.color || colors.text.secondary,
-              fontWeight: value?.bold ? 600 : 400,
-              fontSize: fonts.components.panel.content.fontSize,
-              fontFamily: fonts.components.panel.content.fontFamily,
-            }}
-          >
-            <span style={{ fontWeight: 500 }}>{key}:</span> {value?.text || value}
+      <Box sx={{ display: 'flex', alignItems: 'center', mb: 1, justifyContent: 'space-between' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+          {icon && React.cloneElement(icon, { 
+            sx: { 
+              mr: 1, 
+              fontSize: '1.2rem',
+              color: colors.primary.main,
+              ...icon.props.sx 
+            }
+          })}
+          <Typography variant="h6" sx={{ 
+            fontSize: fonts.components.panel.title.fontSize, 
+            fontWeight: fonts.components.panel.title.fontWeight,
+            fontFamily: fonts.components.panel.title.fontFamily,
+            color: colors.text.primary
+          }}>
+            {title}
           </Typography>
-        ))}
+        </Box>
+        <IconButton
+          size="small"
+          onClick={handleToggleCollapse}
+          sx={{
+            color: colors.text.secondary,
+            '&:hover': {
+              color: colors.primary.main,
+            },
+            padding: '4px',
+          }}
+        >
+          {isCollapsed ? <ExpandMoreIcon fontSize="small" /> : <ExpandLessIcon fontSize="small" />}
+        </IconButton>
       </Box>
+      <Collapse in={!isCollapsed}>
+        <Box sx={{ fontSize: fonts.components.panel.content.fontSize, color: colors.text.secondary }}>
+          {Object.entries(status).map(([key, value], index) => (
+            <Typography 
+              key={index} 
+              variant="body2" 
+              sx={{ 
+                mb: 0.5,
+                color: value?.color || colors.text.secondary,
+                fontWeight: value?.bold ? 600 : 400,
+                fontSize: fonts.components.panel.content.fontSize,
+                fontFamily: fonts.components.panel.content.fontFamily,
+              }}
+            >
+              <span style={{ fontWeight: 500 }}>{key}:</span> {value?.text || value}
+            </Typography>
+          ))}
+        </Box>
+      </Collapse>
     </BasePanel>
   );
 };

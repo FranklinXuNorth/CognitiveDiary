@@ -85,13 +85,16 @@ export const applyChainHighlight = (nodes, edges, chainNodes, chainEdges, colors
         style: {
           ...edge.style,
           stroke: colors.highlight.chain,
-          strokeWidth: 3,
-          filter: `drop-shadow(0 0 5px ${colors.highlight.chain}90)`
+          strokeWidth: 4,
+          filter: `drop-shadow(0 0 5px ${colors.highlight.chain}90)`,
+          strokeDasharray: '5,5',
+          animation: 'chainEdgeFlow 1s linear infinite'
         },
         markerEnd: {
           ...edge.markerEnd,
           color: colors.highlight.chain
-        }
+        },
+        className: 'chain-edge-animated'
       };
     }
     return edge;
@@ -132,12 +135,15 @@ export const clearChainHighlight = (nodes, edges, colors) => {
           ...edge.style,
           stroke: colors.edge.default,
           strokeWidth: 2,
-          filter: undefined
+          filter: undefined,
+          strokeDasharray: undefined,
+          animation: undefined
         },
         markerEnd: {
           ...edge.markerEnd,
           color: colors.edge.default
-        }
+        },
+        className: undefined
       };
     }
     return edge;

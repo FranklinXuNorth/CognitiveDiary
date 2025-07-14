@@ -67,7 +67,10 @@ export const colors = {
     selected: 'rgb(52, 144, 220)',       // 选中蓝色
     locked: 'rgb(200, 210, 220)',        // 锁定灰白色边框
     lockedBackground: 'rgb(14, 27, 40)', // 锁定背景
-    thinking: 'rgb(198, 115, 126)'          // 思考节点背景
+    thinking: 'rgb(198, 115, 126)',      // 思考节点背景
+    editing: 'rgb(50, 109, 183)',        // 编辑状态玫红色
+    annotationBackground: 'rgb(255, 244, 138)', // 便签黄
+    annotationText: 'rgb(0, 0, 0)' // 便签黑字
   },
   
   // 连接线颜色 - 浅蓝色系
@@ -101,7 +104,7 @@ export const colors = {
   
   // 高亮颜色
   highlight: {
-    chain: '#E6C35C' // 淡金色，用于链式查询高亮
+    chain: 'rgb(255, 255, 255)' // 淡金色，用于链式查询高亮
   }
 };
 
