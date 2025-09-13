@@ -133,4 +133,7 @@ export const shadows = {
   floating: '0 4px 20px rgba(0, 0, 0, 0.4)'
 };
 
-export default colors; 
+export default colors;
+
+// 节点编辑时的最小宽度
+export const NODE_EDIT_MIN_WIDTH = 350; 

@@ -115,12 +115,15 @@ const globalStyles = (
       },
       '.react-flow__node': {
         cursor: 'pointer !important',
+        boxShadow: 'none !important',
       },
       '.react-flow__node.dragging': {
         cursor: 'grabbing !important',
+        boxShadow: 'none !important',
       },
       '.react-flow__handle': {
         cursor: 'crosshair !important',
+        boxShadow: 'none !important',
       },
       '.react-flow__controls': {
         cursor: 'default !important',
@@ -413,7 +416,9 @@ function Flow() {
                 // 确保回调函数不被覆盖
                 onAskLLM: node.data.onAskLLM,
                 onChainedQuery: node.data.onChainedQuery,
-                onEdit: node.data.onEdit
+                onEdit: node.data.onEdit,
+                onEditingStateChange: node.data.onEditingStateChange,
+                onCollapseChange: node.data.onCollapseChange
               } 
             }
           : node
@@ -473,6 +478,11 @@ function Flow() {
     console.log('📝 编辑状态变化:', isEditing);
   }, []);
 
+  // 处理折叠状态变化
+  const handleCollapseChange = useCallback((nodeId, isCollapsed) => {
+    updateNode(nodeId, { isCollapsed });
+  }, [updateNode]);
+
   // ==================================================================
   // LLM 和链式查询相关函数
   // ==================================================================
@@ -509,10 +519,12 @@ function Flow() {
         label: "🤔 Thinking...",
         nodeIndex: nextNodeIndex, // 添加节点序号
         isLocked: true,
+        isCollapsed: false, // 默认不折叠
         onAskLLM: (...args) => handleAskLLMRef.current?.(...args),
         onChainedQuery: (...args) => handleChainedQueryRef.current?.(...args),
         onEdit: (...args) => handleNodeEditRef.current?.(...args),
-        onEditingStateChange: handleEditingStateChange // 添加编辑状态变化回调
+        onEditingStateChange: handleEditingStateChange, // 添加编辑状态变化回调
+        onCollapseChange: handleCollapseChange // 添加折叠状态变化回调
       }
     };
     
@@ -713,10 +725,13 @@ function Flow() {
       data: {
         label: '🔗 Chained Thinking...',
         nodeIndex: nextNodeIndex, // 添加节点序号
+        isLocked: true,
+        isCollapsed: false, // 默认不折叠
         onAskLLM: (...args) => handleAskLLMRef.current?.(...args),
         onChainedQuery: (...args) => handleChainedQueryRef.current?.(...args),
         onEdit: (...args) => handleNodeEditRef.current?.(...args),
-        isLocked: true
+        onEditingStateChange: handleEditingStateChange, // 添加编辑状态变化回调
+        onCollapseChange: handleCollapseChange // 添加折叠状态变化回调
       }
     };
     
@@ -872,10 +887,12 @@ function Flow() {
     let nodeData = { 
       label: nodeContent,
       nodeIndex: nextNodeIndex, // 添加节点序号
+      isCollapsed: false, // 默认不折叠
       onAskLLM: (...args) => handleAskLLMRef.current?.(...args), // 直接设置回调
       onChainedQuery: (...args) => handleChainedQueryRef.current?.(...args), // 添加链式查询回调
       onEdit: (...args) => handleNodeEditRef.current?.(...args), // 添加编辑回调
       onEditingStateChange: handleEditingStateChange, // 添加编辑状态变化回调
+      onCollapseChange: handleCollapseChange, // 添加折叠状态变化回调
       ...extraData // 支持额外数据（如锁定状态）
     };
     
@@ -1016,10 +1033,12 @@ function Flow() {
             nodeIndex: node.data.nodeIndex || (index + 1), // 保持原有序号或使用索引+1
               nodeType: isAnnotation ? 'annotation' : (node.data.nodeType || 'normal'), // 设置节点类型
               features: isAnnotation ? ['edit'] : (node.data.features || ['edit', 'ask_llm', 'chained_query']), // 设置功能
+              isCollapsed: node.data.isCollapsed || false, // 保持折叠状态
               onAskLLM: isAnnotation ? undefined : ((...args) => handleAskLLMRef.current?.(...args)),
               onChainedQuery: isAnnotation ? undefined : ((...args) => handleChainedQueryRef.current?.(...args)),
                           onEdit: (...args) => handleNodeEditRef.current?.(...args),
-            onEditingStateChange: handleEditingStateChange // 添加编辑状态变化回调
+            onEditingStateChange: handleEditingStateChange, // 添加编辑状态变化回调
+            onCollapseChange: handleCollapseChange // 添加折叠状态变化回调
           }
         };
         });
@@ -1210,6 +1229,13 @@ function Flow() {
 
   // 处理节点拖拽开始
   const handleNodeDragStart = useCallback((event, node) => {
+    // 如果正在编辑，阻止拖拽
+    if (isAnyNodeEditing) {
+      console.log('🚫 编辑中，阻止节点拖拽');
+      event.preventDefault();
+      return;
+    }
+    
     console.log('🚀 节点拖拽开始:', node.id);
     setIsDraggingNode(true);
     setInteractionMode(InteractionMode.DRAGGING);
@@ -1236,10 +1262,17 @@ function Flow() {
       // 只更新选中状态，不重新设置整个 nodes 数组
       setSelectedNodes([node]);
     }
-  }, [selectedNodes, nodes, selectionGroupIds]);
+  }, [selectedNodes, nodes, selectionGroupIds, isAnyNodeEditing]);
 
   // 处理节点拖拽
   const handleNodeDrag = useCallback((event, node, nodes) => {
+    // 如果正在编辑，阻止拖拽
+    if (isAnyNodeEditing) {
+      console.log('🚫 编辑中，阻止节点拖拽');
+      event.preventDefault();
+      return;
+    }
+    
     // 检查当前是否在框选模式中
     const currentSelectionGroupIds = selectionGroupIds;
     const isInBoxSelectingMode = currentSelectionGroupIds.size > 0;
@@ -1331,10 +1364,17 @@ function Flow() {
     });
     
     setNodes(updatedNodes);
-  }, [selectedNodes, selectionGroupIds]);
+  }, [selectedNodes, selectionGroupIds, isAnyNodeEditing]);
 
   // 处理节点拖拽结束
   const handleNodeDragStop = useCallback(async (event, node) => {
+    // 如果正在编辑，阻止拖拽
+    if (isAnyNodeEditing) {
+      console.log('🚫 编辑中，阻止节点拖拽结束');
+      event.preventDefault();
+      return;
+    }
+    
     console.log('🛑 节点拖拽结束:', node.id);
     setIsDraggingNode(false);
     
@@ -1378,7 +1418,7 @@ function Flow() {
     
     // 不改变交互模式，保持当前状态
     console.log('✅ 单独节点拖拽完成，保持当前交互模式');
-  }, [selectionGroupIds, username, saveData]);
+  }, [selectionGroupIds, username, saveData, isAnyNodeEditing]);
 
   // 批量移动选中的节点
   const moveSelectedNodes = useCallback((deltaX, deltaY) => {
@@ -2026,10 +2066,10 @@ function Flow() {
         selectNodesOnDrag={false} // 拖拽时不选中节点
         elementsSelectable={true} // 启用元素选择，允许选中连线
         nodesConnectable={true}
-        nodesDraggable={true}
+        nodesDraggable={!isAnyNodeEditing} // 编辑时禁用节点拖拽
         multiSelectionKeyCode={null} // 禁用多选快捷键
         deleteKeyCode={null} // 禁用删除快捷键，我们自定义处理
-        preventScrolling={true}
+        preventScrolling={!isAnyNodeEditing} // 编辑时允许滚动
         style={{ 
           cursor: 'default',
           width: '100%',

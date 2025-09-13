@@ -7,14 +7,17 @@ import {
   GlobalStyles,
   TextField,
   Box,
-  IconButton
+  IconButton,
+  Collapse
 } from '@mui/material';
 import {
   Psychology as PsychologyIcon,
   Timeline as TimelineIcon,
   Edit as EditIcon,
   Check as CheckIcon,
-  Close as CloseIcon
+  Close as CloseIcon,
+  ExpandMore as ExpandMoreIcon,
+  ExpandLess as ExpandLessIcon
 } from '@mui/icons-material';
 import {
   Handle,
@@ -22,7 +25,7 @@ import {
 } from 'reactflow';
 
 // 导入颜色和阴影
-import { colors, shadows } from '../../theme/colors';
+import { colors, shadows, NODE_EDIT_MIN_WIDTH } from '../../theme/colors';
 // 导入字体设置
 import { fonts } from '../../theme/fonts';
 // 导入 Markdown 渲染器
@@ -89,6 +92,7 @@ export const CustomNode = ({ data, selected, id }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
   const [nodeWidth, setNodeWidth] = useState(null);
+  const [isCollapsed, setIsCollapsed] = useState(data.isCollapsed || false);
   const editInputRef = useRef(null);
   const nodeRef = useRef(null);
   const open = Boolean(anchorEl);
@@ -130,11 +134,13 @@ export const CustomNode = ({ data, selected, id }) => {
 
   // 开始编辑
   const handleStartEdit = () => {
-    // 记录当前节点宽度
+    // 记录当前节点宽度，编辑时保持原宽度但设置最小宽度
     if (nodeRef.current) {
       const width = nodeRef.current.offsetWidth;
-      setNodeWidth(width);
-      console.log('📏 记录节点宽度:', width);
+      // 编辑时保持原宽度，但确保不小于最小宽度
+      const editWidth = Math.max(width, NODE_EDIT_MIN_WIDTH);
+      setNodeWidth(editWidth);
+      console.log('📏 记录节点宽度:', width, '设置编辑宽度:', editWidth);
     }
     setEditValue(data.label);
     setIsEditing(true);
@@ -179,11 +185,33 @@ export const CustomNode = ({ data, selected, id }) => {
     }
   };
 
+  // 处理折叠/展开
+  const handleToggleCollapse = (event) => {
+    event.stopPropagation();
+    setIsCollapsed(!isCollapsed);
+    // 通知父组件折叠状态变化
+    if (data.onCollapseChange) {
+      data.onCollapseChange(id, !isCollapsed);
+    }
+  };
+
+  // 获取第一行文本用于折叠时显示
+  const getFirstLine = (text) => {
+    const firstLine = text.split('\n')[0];
+    return firstLine.length > 20 ? firstLine.substring(0, 20) + '...' : firstLine;
+  };
+
   // 处理键盘事件
   const handleKeyDown = (event) => {
     // 在编辑模式下阻止删除键的默认行为，防止删除节点
     if (event.key === 'Delete' || event.key === 'Backspace' || (event.ctrlKey && event.key === 'Backspace')) {
       event.stopPropagation();
+      return;
+    }
+    
+    // 允许方向键在编辑时正常工作，用于文字导航
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) {
+      // 不阻止方向键的默认行为，让它们用于文字导航
       return;
     }
     
@@ -249,18 +277,18 @@ export const CustomNode = ({ data, selected, id }) => {
     <>
       <Paper
         ref={nodeRef}
-        elevation={selected ? 8 : 3}
+        elevation={0}
         onContextMenu={handleContextMenu}
         className={`node-edit-container ${(isLocked || isHighlighted) ? 'locked-node-pulse' : ''}`}
         sx={{
           padding: '14px 18px',
           minWidth: '50px',
-          maxWidth: '400px', // 增加最大宽度限制
+          maxWidth: '400px', // 保持统一的最大宽度限制
           width: isEditing && nodeWidth ? `${nodeWidth}px` : 'auto', // 编辑时使用记录的宽度
           textAlign: 'left', // 改为左对齐，更适合长文本
           display: 'flex',
           flexDirection: 'column',
-          alignItems: 'flex-start', // 改为左对齐
+          alignItems: 'stretch', // 改为拉伸对齐，让子元素充满宽度
           justifyContent: 'flex-start', // 改为顶部对齐
           position: 'relative',
           borderRadius: '12px',
@@ -273,39 +301,53 @@ export const CustomNode = ({ data, selected, id }) => {
           opacity: isThinking ? 0.8 : (nodeType === NodeType.ANNOTATION ? 0.8 : 1),
           transition: (isLocked || isHighlighted) ? 'none' : 'all 0.2s ease-in-out', // 锁定时禁用过渡，避免与动画冲突
           cursor: 'pointer !important', // 强制所有节点为pointer
-          boxShadow: selected ? shadows.large : shadows.medium,
+          boxShadow: 'none',
           '&:hover': {
-            elevation: 6,
+            elevation: 0,
             transform: isLocked ? 'none' : 'scale(1.02)',
-            boxShadow: shadows.large,
+            boxShadow: 'none',
           }
         }}
       >
-        {/* 节点序号标签 - 临时禁用 */}
-        {/* {data.nodeIndex !== undefined && (
-          <Box
+        {/* 折叠按钮 - 右上角 */}
+        <IconButton
+          size="small"
+          onClick={handleToggleCollapse}
+          sx={{
+            position: 'absolute',
+            top: '4px',
+            right: '4px',
+            width: '20px',
+            height: '20px',
+            backgroundColor: 'rgba(255, 255, 255, 0.1)',
+            color: colors.text.secondary,
+            '&:hover': {
+              backgroundColor: 'rgba(255, 255, 255, 0.2)',
+              color: colors.primary.main,
+            },
+            zIndex: 10,
+          }}
+        >
+          {isCollapsed ? <ExpandMoreIcon fontSize="small" /> : <ExpandLessIcon fontSize="small" />}
+        </IconButton>
+
+        {/* 折叠时显示第一行文本 */}
+        {isCollapsed && !isEditing && (
+          <Typography
+            variant="body2"
             sx={{
-              position: 'absolute',
-              top: '-8px',
-              left: '-8px',
-              width: '24px',
-              height: '24px',
-              borderRadius: '50%',
-              backgroundColor: colors.primary.main,
-              color: colors.primary.contrastText,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '12px',
-              fontWeight: 'bold',
-              zIndex: 10,
-              boxShadow: shadows.small,
-              border: `2px solid ${colors.background.default}`
+              color: nodeType === NodeType.ANNOTATION ? colors.node.annotationText : colors.text.primary,
+              fontSize: fonts.components.node.fontSize,
+              fontWeight: fonts.components.node.fontWeight,
+              fontFamily: fonts.components.node.fontFamily,
+              opacity: 0.7,
+              cursor: 'pointer',
+              userSelect: 'none',
             }}
           >
-            {data.nodeIndex}
-          </Box>
-        )} */}
+            {getFirstLine(data.label)}
+          </Typography>
+        )}
         
         {/* 原始标注节点不显示连接点 */}
         {nodeType !== NodeType.ANNOTATION && (
@@ -317,119 +359,116 @@ export const CustomNode = ({ data, selected, id }) => {
               border: `3px solid ${colors.handle.border}`,
               width: '14px',
               height: '14px',
-              boxShadow: shadows.handle,
+              boxShadow: 'none',
               cursor: 'crosshair'
             }}
           />
         )}
         
-        {isEditing ? (
-          <Box sx={{ 
-            width: '100%', 
-            position: 'relative',
-            minWidth: '100%',
-            maxWidth: '100%'
-          }}>
-            <TextField
-              ref={editInputRef}
-              value={editValue}
-              onChange={(e) => setEditValue(e.target.value)}
-              onKeyDown={handleKeyDown}
-              onClick={(e) => e.stopPropagation()}
-              onMouseDown={(e) => e.stopPropagation()}
-              multiline
-              maxRows={8}
-              variant="outlined"
-              size="small"
-              autoComplete="off"
-              sx={{
-                width: '100%',
-                minWidth: '100%',
-                maxWidth: '100%',
-                '& .MuiOutlinedInput-root': {
+        {/* 内容区域 - 使用Collapse包装 */}
+        <Collapse in={!isCollapsed}>
+          {isEditing ? (
+            <Box sx={{ 
+              width: '100%', 
+              position: 'relative',
+              minWidth: '100%',
+              maxWidth: '100%',
+              flex: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'stretch'
+            }}>
+              <textarea
+                ref={editInputRef}
+                value={editValue}
+                onChange={(e) => setEditValue(e.target.value)}
+                onKeyDown={handleKeyDown}
+                onClick={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+                onWheel={(e) => {
+                  // 只阻止事件冒泡，不阻止默认行为，允许textarea内部滚动
+                  e.stopPropagation();
+                }}
+                style={{
+                  width: '100%',
+                  minHeight: '120px',
+                  maxHeight: '300px',
                   padding: '8px 12px',
                   fontSize: '14px',
                   fontFamily: fonts.components.node.fontFamily,
                   lineHeight: 1.4,
-                  color: (nodeType === NodeType.ANNOTATION ? colors.node.annotationText : colors.text.primary),
+                  color: nodeType === NodeType.ANNOTATION ? colors.node.annotationText : colors.text.primary,
                   backgroundColor: 'transparent',
                   border: 'none',
                   borderRadius: '6px',
-                  width: '100%',
-                  minWidth: '100%',
-                  maxWidth: '100%',
-                  '& fieldset': {
-                    border: 'none',
-                  },
-                  '&:hover fieldset': {
-                    border: 'none',
-                  },
-                  '&.Mui-focused fieldset': {
-                    border: 'none',
-                  },
-                },
-                '& .MuiInputBase-input': {
-                  padding: 0,
-                  width: '100%',
-                },
+                  resize: 'none',
+                  outline: 'none',
+                  wordWrap: 'break-word',
+                  wordBreak: 'break-word',
+                  whiteSpace: 'pre-wrap',
+                  boxSizing: 'border-box',
+                  flex: 1,
+                  overflowY: 'auto',
+                  overflowX: 'hidden',
+                }}
+              />
+              <Box sx={{ 
+                display: 'flex', 
+                gap: 1, 
+                mt: 1, 
+                justifyContent: 'flex-end' 
+              }}>
+                <IconButton
+                  size="small"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleConfirmEdit();
+                  }}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  sx={{
+                    backgroundColor: colors.success.main,
+                    color: colors.success.contrastText,
+                    '&:hover': {
+                      backgroundColor: colors.success.dark,
+                    },
+                    width: 24,
+                    height: 24,
+                  }}
+                >
+                  <CheckIcon fontSize="small" />
+                </IconButton>
+                <IconButton
+                  size="small"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleCancelEdit();
+                  }}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  sx={{
+                    backgroundColor: colors.error.main,
+                    color: colors.error.contrastText,
+                    '&:hover': {
+                      backgroundColor: colors.error.dark,
+                    },
+                    width: 24,
+                    height: 24,
+                  }}
+                >
+                  <CloseIcon fontSize="small" />
+                </IconButton>
+              </Box>
+            </Box>
+          ) : (
+            <MarkdownRenderer 
+              content={data.label}
+              color={nodeType === NodeType.ANNOTATION ? colors.node.annotationText : colors.text.primary}
+              sx={{
+                cursor: 'pointer',
+                minHeight: '1.4em'
               }}
             />
-            <Box sx={{ 
-              display: 'flex', 
-              gap: 1, 
-              mt: 1, 
-              justifyContent: 'flex-end' 
-            }}>
-              <IconButton
-                size="small"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleConfirmEdit();
-                }}
-                onMouseDown={(e) => e.stopPropagation()}
-                sx={{
-                  backgroundColor: colors.success.main,
-                  color: colors.success.contrastText,
-                  '&:hover': {
-                    backgroundColor: colors.success.dark,
-                  },
-                  width: 24,
-                  height: 24,
-                }}
-              >
-                <CheckIcon fontSize="small" />
-              </IconButton>
-              <IconButton
-                size="small"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleCancelEdit();
-                }}
-                onMouseDown={(e) => e.stopPropagation()}
-                sx={{
-                  backgroundColor: colors.error.main,
-                  color: colors.error.contrastText,
-                  '&:hover': {
-                    backgroundColor: colors.error.dark,
-                  },
-                  width: 24,
-                  height: 24,
-                }}
-              >
-                <CloseIcon fontSize="small" />
-              </IconButton>
-            </Box>
-          </Box>
-        ) : (
-          <MarkdownRenderer 
-            content={data.label}
-            color={nodeType === NodeType.ANNOTATION ? colors.node.annotationText : colors.text.primary}
-            sx={{
-              cursor: 'pointer',
-              minHeight: '1.4em'
-            }}
-          />
-        )}
+          )}
+        </Collapse>
         
         {/* 原始标注节点不显示连接点 */}
         {nodeType !== NodeType.ANNOTATION && (
@@ -441,7 +480,7 @@ export const CustomNode = ({ data, selected, id }) => {
               border: `3px solid ${colors.handle.border}`,
               width: '14px',
               height: '14px',
-              boxShadow: shadows.handle,
+              boxShadow: 'none',
               cursor: 'crosshair'
             }}
           />

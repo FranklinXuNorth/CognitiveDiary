@@ -52,7 +52,7 @@ export const InfoPanel = ({
   sx = {},
   ...props 
 }) => {
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(true);
 
   const handleToggleCollapse = () => {
     setIsCollapsed(!isCollapsed);
@@ -134,7 +134,7 @@ export const StatusPanel = ({
   sx = {},
   ...props 
 }) => {
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(true);
 
   const handleToggleCollapse = () => {
     setIsCollapsed(!isCollapsed);
